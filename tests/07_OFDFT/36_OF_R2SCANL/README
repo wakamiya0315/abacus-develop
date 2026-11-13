@@ -1,0 +1,6 @@
+OF-WT/r2SCAN-L density minimization with the author HQLPP Al potential.
+20 Ry / odd FFT grid / symmetry=0 is a small functionality regression, not an accuracy-converged material reference.
+Both energy (1e-8 Ry) and potential norm (1e-5) must converge.
+Al_HQLPP2024.cpi is unchanged from chenhuang3/local_pseudopotential_files, commit 84dd264d7ba6399d17e2b214594a3021a209c2d8, Al/al_lps.cpi.
+SHA256 ada51c7b4cbd398ed7a377e493151a86ededa266ea803bc4e54720f8e3354581.
+The integration fixture requires Libxc with r2SCAN-L.

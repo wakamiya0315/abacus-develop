@@ -281,7 +281,8 @@ void ESolver_FP::iter_finish(UnitCell& ucell, const int istep, int& iter, bool& 
             const System_para& system = PARAM.globalv;
             const bool write_restart = this->inp_->out_chg[0] != -1;
             const std::string prefix = system.global_out_dir + this->inp_->suffix;
-            const bool write_tau = XC_Functional::get_ked_flag();
+            const bool has_orbitals = this->inp_->esolver_type != "ofdft" && this->inp_->esolver_type != "tdofdft";
+            const bool write_tau = XC_Functional::get_ked_flag() && has_orbitals;
             const bool writer_pool = GlobalV::MY_POOL == 0;
             const Parallel::ParaWorld pw_world = Parallel::make_pw_world();
             module_charge::write_density_restart(this->chr,

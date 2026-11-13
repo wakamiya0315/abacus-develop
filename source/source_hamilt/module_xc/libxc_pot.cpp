@@ -507,17 +507,21 @@ std::tuple<double,double,ModuleBase::matrix,ModuleBase::matrix> XC_Functional_Li
     XC_Functional_Libxc::cal_gdr_and_lapl(nspin, nrxx, rho, tpiba, chr, gdr, lapl, need_laplacian);
     const std::vector<double> sigma = XC_Functional_Libxc::convert_sigma(gdr);
 
-    //converting kin_r
-    std::vector<double> kin_r;
-    kin_r.resize(nrxx*nspin);
+    // Density-only meta-GGAs must remain independent of orbital/TF tau,
+    // including when an OF caller has no kinetic-density buffer at all.
+    const bool density_only_meta = XC_Functional::is_density_only_meta_gga(func_id);
+    std::vector<double> kin_r(nrxx * nspin, 0.0);
+    if (!density_only_meta)
+    {
 #ifdef _OPENMP
 #pragma omp parallel for collapse(2) schedule(static, 1024)
 #endif
-    for( int is=0; is<nspin; ++is )
-    {
-        for( int ir=0; ir<nrxx; ++ir )
+        for (int is = 0; is < nspin; ++is)
         {
-            kin_r[ir*nspin+is] = chr->kin_r[is][ir] / 2.0;
+            for (int ir = 0; ir < nrxx; ++ir)
+            {
+                kin_r[ir*nspin+is] = chr->kin_r[is][ir] / 2.0;
+            }
         }
     }
 
@@ -547,7 +551,8 @@ std::tuple<double,double,ModuleBase::matrix,ModuleBase::matrix> XC_Functional_Li
 #endif
         for( int ir=0; ir<nrxx; ++ir )
         {
-            if ( rho[ir]<rho_th || sqrt(std::abs(sigma[ir]))<grho_th || std::abs(kin_r[ir])<tau_th)
+            const bool small_orbital_inputs = sqrt(std::abs(sigma[ir])) < grho_th || std::abs(kin_r[ir]) < tau_th;
+            if (rho[ir] < rho_th || (!density_only_meta && small_orbital_inputs))
             {
                 sgn[ir] = 0.0;
             }
@@ -560,9 +565,11 @@ std::tuple<double,double,ModuleBase::matrix,ModuleBase::matrix> XC_Functional_Li
 #endif
         for( int ir=0; ir<nrxx; ++ir )
         {
-            if ( rho[ir*2]<rho_th || sqrt(std::abs(sigma[ir*3]))<grho_th || std::abs(kin_r[ir*2])<tau_th)
+            const bool small_up = sqrt(std::abs(sigma[ir*3])) < grho_th || std::abs(kin_r[ir*2]) < tau_th;
+            const bool small_down = sqrt(std::abs(sigma[ir*3+2])) < grho_th || std::abs(kin_r[ir*2+1]) < tau_th;
+            if (rho[ir*2] < rho_th || (!density_only_meta && small_up))
                 { sgn[ir*2] = 0.0; }
-            if ( rho[ir*2+1]<rho_th || sqrt(std::abs(sigma[ir*3+2]))<grho_th || std::abs(kin_r[ir*2+1])<tau_th)
+            if (rho[ir*2+1] < rho_th || (!density_only_meta && small_down))
                 { sgn[ir*2+1] = 0.0; }
         }
     }

@@ -17,6 +17,41 @@ int XC_Functional::func_type = 0;
 bool XC_Functional::ked_flag = false;
 bool XC_Functional::need_laplacian = false;
 bool XC_Functional::use_libxc = true;
+
+bool XC_Functional::is_density_only_meta_gga(const std::vector<int>& functional_ids)
+{
+#ifdef __LIBXC
+    if (functional_ids.empty())
+    {
+        return false;
+    }
+    for (const int id : functional_ids)
+    {
+        bool allowed = id == XC_MGGA_X_SCANL || id == XC_MGGA_C_SCANL;
+#if defined(XC_MGGA_X_R2SCANL) && defined(XC_MGGA_C_R2SCANL)
+        allowed = allowed || id == XC_MGGA_X_R2SCANL || id == XC_MGGA_C_R2SCANL;
+#endif
+        if (!allowed)
+        {
+            return false;
+        }
+    }
+    std::vector<xc_func_type> funcs = XC_Functional_Libxc::init_func(functional_ids, XC_UNPOLARIZED, 0.0, 0.0);
+    bool needs_laplacian = false;
+    bool needs_tau = false;
+    for (const xc_func_type& func : funcs)
+    {
+        needs_laplacian = needs_laplacian || (func.info->flags & XC_FLAGS_NEEDS_LAPLACIAN);
+#ifdef XC_FLAGS_NEEDS_TAU
+        needs_tau = needs_tau || (func.info->flags & XC_FLAGS_NEEDS_TAU);
+#endif
+    }
+    XC_Functional_Libxc::finish_func(funcs);
+    return needs_laplacian && !needs_tau;
+#else
+    return false;
+#endif
+}
 double XC_Functional::hybrid_alpha = 0.25;
 double XC_Functional::hse_omega = 0.0;
 XCFunctionalParameters XC_Functional::runtime_parameters;

@@ -104,6 +104,10 @@ class XC_Functional
 
     static void set_xc_type(const std::string xc_func_in);
 
+    /// Density-only meta-GGAs admitted by the orbital-free path. The strict
+    /// SCAN-L/r2SCAN-L allowlist is checked against the installed Libxc flags.
+    static bool is_density_only_meta_gga(const std::vector<int>& functional_ids);
+
     // Temporary adapter for legacy Potential -> PotXC -> XC evaluation globals.
     // Restores the complete selection on scope exit, including exception unwinding.
     // Scopes may nest, but must not overlap across threads: this is process-wide state.
@@ -150,12 +154,13 @@ class XC_Functional
         return hse_omega;
     };
 
+    /// Legacy meta-GGA dispatch/allocation flag, also true for density-only XC.
     static bool get_ked_flag()
     {
         return ked_flag;
     };
 
-    /// @brief Set whether the functional needs the kinetic energy density.
+    /// @brief Set the legacy meta-GGA dispatch/allocation flag.
     static void set_ked_flag(const bool ked_flag_in)
     {
         ked_flag = ked_flag_in;
@@ -175,7 +180,7 @@ class XC_Functional
 
     static std::vector<int> func_id; // libxc id of functional
     static int func_type; //0:none, 1:lda, 2:gga, 3:mgga, 4:hybrid lda/gga, 5:hybrid mgga
-    static bool ked_flag; // whether the functional has kinetic energy density
+    static bool ked_flag; // legacy meta-GGA dispatch/buffer flag, also true for density-only meta-GGAs
     static bool need_laplacian; // whether any functional needs Laplacian of density
     static bool use_libxc;
     // exx_hybrid_alpha for mixing exx in hybrid functional:

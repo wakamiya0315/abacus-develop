@@ -63,10 +63,13 @@ void ESolver_OF::before_all_runners(BaseCell& basecell, const Input_para& inp)
     ModuleBase::GlobalFunc::DONE(GlobalV::ofs_running, "SETUP UNITCELL");
 
 //  XC_Functional::set_xc_type(ucell.atoms[0].ncpp.xc_func);
-    int func_type = XC_Functional::get_func_type();
-    if (func_type > 2)
+    const int func_type = XC_Functional::get_func_type();
+    const std::vector<int>& functional_ids = XC_Functional::get_func_id();
+    const bool density_only_meta = XC_Functional::is_density_only_meta_gga(functional_ids);
+    if (func_type > 2 && !(func_type == 3 && density_only_meta))
     {
-        ModuleBase::WARNING_QUIT("esolver_of", "meta-GGA and Hybrid functionals are not supported by OFDFT.");
+        ModuleBase::WARNING_QUIT("esolver_of", "OFDFT supports LDA/GGA and density-only SCAN-L/r2SCAN-L. "
+                                             "Tau-dependent meta-GGA and hybrid functionals are not supported.");
     }
 
     module_charge::InitRhoCfg init_rho_cfg;
@@ -80,7 +83,9 @@ void ESolver_OF::before_all_runners(BaseCell& basecell, const Input_para& inp)
     init_rho_cfg.domag = PARAM.globalv.domag;
     init_rho_cfg.domag_z = PARAM.globalv.domag_z;
     init_rho_cfg.npol = PARAM.globalv.npol;
-    init_rho_cfg.meta_gga = XC_Functional::get_ked_flag();
+    // Deorbitalized XC neither reads a tau restart nor needs a fictitious TF tau.
+    // Keep the legacy meta-GGA buffer/dispatch flag for PotXC and stress.
+    init_rho_cfg.meta_gga = XC_Functional::get_ked_flag() && !density_only_meta;
     this->chr.init_rho(ucell, this->Pgrid, this->sf.strucFac, ucell.symm, &this->kv, nullptr, init_rho_cfg);
     module_charge::check_rho(this->chr.rho, this->chr.nspin, this->chr.rhopw->nrxx, ucell.omega,
                              this->chr.rhopw->nxyz, inp.nelec); // check the rho

@@ -115,7 +115,10 @@ void ctrl_output_fp(UnitCell& ucell,
                                           ofs_running,
                                           desc_chg);
 
-            if (XC_Functional::get_ked_flag())
+            // The legacy meta-GGA flag also routes density-only XC. OF has
+            // no orbital tau to export, even when that dispatch flag is set.
+            const bool has_orbitals = inp.esolver_type != "ofdft" && inp.esolver_type != "tdofdft";
+            if (XC_Functional::get_ked_flag() && has_orbitals)
             {
                 fn = global_chg_dir + "tau";
 

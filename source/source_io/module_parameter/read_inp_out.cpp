@@ -78,7 +78,7 @@ void ReadInput::item_output()
         - nspin = 1: `chg.cube`;
         - nspin = 2: `chgs1.cube`, and `chgs2.cube`;
         - nspin = 4: `chgs1.cube`, `chgs2.cube`, `chgs3.cube`, and `chgs4.cube`;
-        - When using the Meta-GGA functional, additional files containing the kinetic energy density are also output:
+        - For orbital-based solvers using a Meta-GGA functional, additional files containing the kinetic energy density are also output (density-only OFDFT does not produce an orbital tau file):
             - nspin = 1: `tau.cube`;
             - nspin = 2: `taus1.cube`, and `taus2.cube`;
             - nspin = 4: `taus1.cube`, `taus2.cube`, `taus3.cube`, and `taus4.cube`;

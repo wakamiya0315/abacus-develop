@@ -36,6 +36,7 @@ the developments and applications of novel machine-learning-assisted DFT methods
 
    advanced/install
    advanced/scf/index
+   advanced/ofdft_density_only_xc
    advanced/pp_orb
    advanced/opt
    advanced/md

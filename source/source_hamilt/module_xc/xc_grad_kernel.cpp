@@ -34,6 +34,7 @@ void gradcorr_xc_kernel(const GradCorrParams& params,
     const bool use_libxc = params.use_libxc;
     const int func_type = params.func_type;
     const std::vector<int>& func_id = params.func_id;
+    const bool density_only_meta = XC_Functional::is_density_only_meta_gga(func_id);
 
     const double epsr = 1.0e-6;
 
@@ -116,7 +117,11 @@ void gradcorr_xc_kernel(const GradCorrParams& params,
                         {
                             double v3xc = 0.0;
                             double vlaplxc = 0.0;
-                            double atau = chr->kin_r[0][ir]/2.0;
+                            double atau = 0.0;
+                            if (!density_only_meta)
+                            {
+                                atau = chr->kin_r[0][ir] / 2.0;
+                            }
                             double lapl_val = (!buf.lapl1.empty()) ? buf.lapl1[ir] : 0.0;
                             XC_Functional_Libxc::tau_xc( tls_funcs, arho, grho2a, lapl_val, atau, sxc, v1xc, v2xc, v3xc, vlaplxc, hybrid_alpha_in);
                             if(!buf.vlapl_arr1.empty()) buf.vlapl_arr1[ir] = vlaplxc;
@@ -184,8 +189,13 @@ void gradcorr_xc_kernel(const GradCorrParams& params,
                         double v3xcdw = 0.0;
                         double vlaplxcup = 0.0;
                         double vlaplxcdw = 0.0;
-                        double atau1 = chr->kin_r[0][ir]/2.0;
-                        double atau2 = chr->kin_r[1][ir]/2.0;
+                        double atau1 = 0.0;
+                        double atau2 = 0.0;
+                        if (!density_only_meta)
+                        {
+                            atau1 = chr->kin_r[0][ir] / 2.0;
+                            atau2 = chr->kin_r[1][ir] / 2.0;
+                        }
                         double laplup_val = (!buf.lapl1.empty()) ? buf.lapl1[ir] : 0.0;
                         double lapldw_val = (!buf.lapl2.empty()) ? buf.lapl2[ir] : 0.0;
                         XC_Functional_Libxc::tau_xc_spin(

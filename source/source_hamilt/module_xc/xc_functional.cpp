@@ -25,17 +25,9 @@ bool XC_Functional::is_density_only_meta_gga(const std::vector<int>& functional_
     {
         return false;
     }
-    for (const int id : functional_ids)
-    {
-        bool allowed = id == XC_MGGA_X_SCANL || id == XC_MGGA_C_SCANL;
-#if defined(XC_MGGA_X_R2SCANL) && defined(XC_MGGA_C_R2SCANL)
-        allowed = allowed || id == XC_MGGA_X_R2SCANL || id == XC_MGGA_C_R2SCANL;
-#endif
-        if (!allowed)
-        {
-            return false;
-        }
-    }
+    // 密度だけで決まる meta-GGA: 少なくとも1成分が Laplacian を要し、どの成分も tau を要さない。
+    // 以前は SCAN-L / r2SCAN-L の ID に限っていたが、Libxc の flags で判定すれば
+    // CC06 など他の Laplacian 型汎関数も、軌道 tau を使わない同じ経路で評価できる。
     std::vector<xc_func_type> funcs = XC_Functional_Libxc::init_func(functional_ids, XC_UNPOLARIZED, 0.0, 0.0);
     bool needs_laplacian = false;
     bool needs_tau = false;

@@ -81,10 +81,6 @@ void Charge_Mixing::set_mixing(const MixingConfig& cfg,
     ModuleBase::GlobalFunc::OUT(GlobalV::ofs_running, "mixing_beta", this->cfg_.mixing_beta);
     ModuleBase::GlobalFunc::OUT(GlobalV::ofs_running, "mixing_gg0", cfg_.mixing_gg0);
     ModuleBase::GlobalFunc::OUT(GlobalV::ofs_running, "mixing_gg0_min", cfg_.mixing_gg0_min);
-    if (cfg_.mixing_gg1 > 0.0)
-    {
-        ModuleBase::GlobalFunc::OUT(GlobalV::ofs_running, "mixing_gg1", cfg_.mixing_gg1);
-    }
 
     if (this->cfg_.nspin==2 || this->cfg_.nspin==4)
     {

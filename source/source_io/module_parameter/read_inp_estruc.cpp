@@ -686,27 +686,6 @@ The magnetic-density Kerker preconditioner is bypassed when mixing_beta_mag <= 0
         this->add_item(item);
     }
     {
-        Input_Item item("mixing_gg1");
-        item.annotation = "high-G damping wavevector of the density preconditioner";
-        item.category = "Electronic structure";
-        item.type = "Real";
-        item.description = R"(Multiplies the charge-density residual by 1/(1 + G^2/q1^2) before Broyden/Pulay/plain mixing, where q1 = mixing_gg1 in 1/Angstrom.
-* >0: Damps short-wavelength (large-G) residual components. This is intended for density functionals whose exchange-correlation kernel grows with G, such as Laplacian-dependent meta-GGAs (SCAN-L, r2SCAN-L). For these functionals the dielectric response behaves like 1 + c G^2 at large G, so a fixed mixing_beta becomes unstable as ecutrho increases.
-* 0 or negative: Disabled (default). The mixing is then identical to the previous behaviour.
-
-Unlike mixing_gg0, this damping is applied regardless of mixing_beta. It is applied only to the total charge density in reciprocal space (scf_thr_type=1) and is not used for the magnetization or the kinetic energy density.)";
-        item.default_value = "0.0";
-        item.unit = "1/Angstrom";
-        read_sync_double(input.mixing_gg1);
-        item.check_value = [](const Input_Item& item, const Parameter& para) {
-            if (para.input.mixing_gg1 > 0.0 && para.input.scf_thr_type == 2)
-            {
-                ModuleBase::WARNING_QUIT("ReadInput", "mixing_gg1 is only implemented for scf_thr_type = 1");
-            }
-        };
-        this->add_item(item);
-    }
-    {
         Input_Item item("mixing_gg0_min");
         item.annotation = "the minimum kerker coefficient";
         item.category = "Electronic structure";

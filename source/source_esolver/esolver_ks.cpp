@@ -92,8 +92,7 @@ void ESolver_KS::before_all_runners(BaseCell& basecell, const Input_para& inp)
         PARAM.globalv.gamma_only_pw,                      // gamma_only_pw
         PARAM.globalv.domag,                              // domag
         PARAM.globalv.domag_z,                            // domag_z
-        inp.scf_nmax,                                     // scf_nmax
-        inp.mixing_gg1                                    // mixing_gg1
+        inp.scf_nmax                                      // scf_nmax
     };
 #pragma GCC diagnostic pop
     p_chgmix->set_mixing(mix_cfg, this->pw_rho, this->pw_rhod, ucell.omega, ucell.tpiba);

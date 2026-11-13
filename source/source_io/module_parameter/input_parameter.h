@@ -116,6 +116,7 @@ struct Input_para
     double mixing_beta_mag = -10.0;
     double mixing_gg0_mag = 0.0;
     double mixing_gg0_min = 0.1;
+    double mixing_gg1 = 0.0;   ///< high-G damping of the density preconditioner (1/Angstrom); <=0 disables
     double mixing_angle = -10.0;
     bool mixing_tau = false;  ///< whether to mix tau in mgga
     bool mixing_dftu = false; ///< whether to mix occ_mat in DFT+U

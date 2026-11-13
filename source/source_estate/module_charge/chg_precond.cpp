@@ -19,6 +19,24 @@ void kerker_screen_recip(const MixingConfig& cfg,
 {
     ModuleBase::TITLE("module_charge", "kerker_screen_recip");
 
+    // High-G damping 1/(1 + G^2/q1^2) of the total-density residual.
+    // For Laplacian-dependent meta-GGAs the XC kernel grows like G^4 while the
+    // KS response decays like 1/G^2, so the dielectric operator behaves like
+    // 1 + c G^2 at large G. A G-independent mixing_beta then becomes unstable
+    // as ecutrho grows; this factor approximates the inverse of that growth.
+    // It is applied even when the Kerker part below is bypassed.
+    if (cfg.mixing_gg1 > 0.0)
+    {
+        const double gg1 = std::pow(cfg.mixing_gg1 * ModuleBase::BOHR_TO_A / tpiba, 2);
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static, 512)
+#endif
+        for (int ig = 0; ig < rhopw->npw; ++ig)
+        {
+            drhog[ig] *= 1.0 / (1.0 + rhopw->gg[ig] / gg1);
+        }
+    }
+
     if (cfg.mixing_gg0 <= 0.0 || cfg.mixing_beta <= 0.1)
     {
         return;

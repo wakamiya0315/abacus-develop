@@ -27,6 +27,7 @@ struct MixingConfig
     bool domag;                ///< whether magnetism (non-collinear) is considered
     bool domag_z;              ///< whether only the z-component magnetism is considered
     int scf_nmax;              ///< max SCF iterations, sizes the drho oscillation history (PARAM.inp.scf_nmax)
+    double mixing_gg1 = 0.0;   ///< high-G damping wavevector (1/Angstrom) of the density preconditioner; <=0 disables
 };
 
 #endif // CHG_MIX_CFG_H

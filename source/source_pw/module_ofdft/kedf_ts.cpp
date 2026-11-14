@@ -6,6 +6,8 @@
 #include "source_base/timer.h"
 #include "source_base/tool_quit.h"
 
+#include <torch/cuda.h>
+
 void KEDF_TS::set_para(const std::string& device_inpt, std::ostream& ofs_running)
 {
     if (GlobalV::NPROC != 1)

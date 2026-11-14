@@ -3,10 +3,58 @@
 #include "write_mlkedf_desc.h"
 
 #include "npy.hpp"
+#include "source_base/constants.h"
 #include "source_estate/module_charge/chg_symm.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <string>
 
 namespace ModuleIO
 {
+namespace
+{
+// Fork addition (opt-in): ABACUS_MLKEDF_LABELS_ONLY=1 writes rho and the labels (F, V_P, veff) but not
+// the ~35 descriptor arrays. The descriptors are deterministic functions of rho and can be recomputed
+// outside ABACUS; writing them all in float64 takes ~20 GB for a 12 A box at 800 Ry.
+bool labels_only_requested()
+{
+    const char* value = std::getenv("ABACUS_MLKEDF_LABELS_ONLY");
+    return value != nullptr && std::string(value) == "1";
+}
+
+// The constant ABACUS adds to V_P in getF_KS: the largest eigenvalue among bands with
+// wg >= threshold_wg. For smeared metals this is not the Fermi level, so it is written next to
+// the labels together with E_F, which lets V_P be re-referenced to E_F afterwards.
+double top_occupied_eigenvalue(const elecstate::ElecState* pelec)
+{
+    double eps = pelec->ekb(0, 0);
+    for (int ik = 0; ik < pelec->wg.nr; ++ik)
+    {
+        for (int ib = 0; ib < pelec->wg.nc; ++ib)
+        {
+            if (pelec->wg(ik, ib) >= ModuleBase::threshold_wg && pelec->ekb(ik, ib) > eps)
+            {
+                eps = pelec->ekb(ik, ib);
+            }
+        }
+    }
+    return eps;
+}
+
+// F and V_P are symmetrized the same way as in the original generateTrainData_KS.
+void symmetrize_field(std::vector<double>& field, ModulePW::PW_Basis* pw_rho, UnitCell& ucell)
+{
+    std::vector<std::complex<double>> fieldg(pw_rho->npw);
+    double* ptr = field.data();
+    std::complex<double>* gptr = fieldg.data();
+    module_charge::cal_rhog_symm(0, &ptr, &gptr, pw_rho->npw, nullptr, pw_rho, ucell.symm);
+}
+} // namespace
+
 void Write_MLKEDF_Descriptors::generateTrainData_KS(
     const std::string& out_dir,
     psi::Psi<std::complex<double>> *psi,
@@ -25,29 +73,27 @@ void Write_MLKEDF_Descriptors::generateTrainData_KS(
 
     std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
 
-    this->generate_descriptor(out_dir, pelec->charge->rho, pw_rho, drho, nrxx);
+    const long unsigned cshape[] = {(long unsigned) nrxx};
+    if (labels_only_requested())
+    {
+        std::vector<double> rho(pelec->charge->rho[0], pelec->charge->rho[0] + nrxx);
+        npy::SaveArrayAsNumpy(out_dir + "/rho.npy", false, 1, cshape, rho);
+        this->cal_tool->getNablaRho(pelec->charge->rho, pw_rho, drho); // still needed for F
+    }
+    else
+    {
+        this->generate_descriptor(out_dir, pelec->charge->rho, pw_rho, drho, nrxx);
+    }
 
     std::vector<double> enhancement(nrxx);
     std::vector<double> pauli(nrxx);
 
     this->cal_tool->getF_KS(psi, pelec, pw_psi, pw_rho, ucell, drho, enhancement, pauli);
 
-    std::vector<double> rho_vec(nrxx);
-    std::vector<std::complex<double>> rhog_vec(pw_rho->npw);
-    double* rho_ptr = rho_vec.data();
-    std::complex<double>* rhog_ptr = rhog_vec.data();
-
-    std::copy(enhancement.begin(), enhancement.end(), rho_vec.begin());
-    module_charge::cal_rhog_symm(0, &rho_ptr, &rhog_ptr, pw_rho->npw, nullptr, pw_rho, ucell.symm);
-    std::copy(rho_vec.begin(), rho_vec.end(), enhancement.begin());
-
-    std::copy(pauli.begin(), pauli.end(), rho_vec.begin());
-    module_charge::cal_rhog_symm(0, &rho_ptr, &rhog_ptr, pw_rho->npw, nullptr, pw_rho, ucell.symm);
-    std::copy(rho_vec.begin(), rho_vec.end(), pauli.begin());
-
+    symmetrize_field(enhancement, pw_rho, ucell);
+    symmetrize_field(pauli, pw_rho, ucell);
 
     // output data in .npy format
-    const long unsigned cshape[] = {(long unsigned) nrxx};
     npy::SaveArrayAsNumpy(out_dir + "/enhancement.npy", false, 1, cshape, enhancement);
     npy::SaveArrayAsNumpy(out_dir + "/pauli.npy", false, 1, cshape, pauli);
 
@@ -56,7 +102,102 @@ void Write_MLKEDF_Descriptors::generateTrainData_KS(
         enhancement[ir] = veff[ir];
     }
     npy::SaveArrayAsNumpy(out_dir + "/veff.npy", false, 1, cshape, enhancement);
+
+    std::ofstream ref(out_dir + "/pauli_reference.txt");
+    ref << std::setprecision(15) << "# V_P in pauli.npy = (tau_P - sum_i w_i eps_i |psi_i|^2) / rho + epsilon_M (Ry)\n"
+        << "epsilon_M_Ry " << top_occupied_eigenvalue(pelec) << "\n"
+        << "efermi_Ry " << pelec->eferm.ef << "\n";
 }
+
+void Write_MLKEDF_Descriptors::generatePathData_KS(
+    const std::string& out_dir,
+    const int iter,
+    psi::Psi<std::complex<double>> *psi,
+    elecstate::ElecState *pelec,
+    ModulePW::PW_Basis_K *pw_psi,
+    ModulePW::PW_Basis *pw_rho,
+    UnitCell& ucell,
+    const int nrxx
+)
+{
+    const std::string dir = out_dir + "/path";
+    std::filesystem::create_directories(dir);
+
+    std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
+    this->cal_tool->getNablaRho(pelec->charge->rho, pw_rho, drho);
+    std::vector<double> enhancement(nrxx);
+    std::vector<double> pauli(nrxx);
+    this->cal_tool->getF_KS(psi, pelec, pw_psi, pw_rho, ucell, drho, enhancement, pauli);
+    symmetrize_field(enhancement, pw_rho, ucell);
+    symmetrize_field(pauli, pw_rho, ucell);
+
+    // float32 halves the storage; the path data are for later training, not for the reference energies.
+    char prefix[32];
+    std::snprintf(prefix, sizeof(prefix), "/iter_%04d_", iter);
+    const long unsigned cshape[] = {(long unsigned) nrxx};
+    std::vector<float> buffer(nrxx);
+    std::copy(pelec->charge->rho[0], pelec->charge->rho[0] + nrxx, buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "rho.npy", false, 1, cshape, buffer);
+    std::copy(enhancement.begin(), enhancement.end(), buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "enhancement.npy", false, 1, cshape, buffer);
+    std::copy(pauli.begin(), pauli.end(), buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "pauli.npy", false, 1, cshape, buffer);
+
+    const bool new_file = !std::filesystem::exists(dir + "/meta.txt");
+    std::ofstream meta(dir + "/meta.txt", std::ios::app);
+    if (new_file)
+    {
+        meta << "# iter epsilon_M_Ry efermi_Ry (rho is the output density of the iteration, before mixing)\n";
+    }
+    meta << std::setprecision(15) << iter << " " << top_occupied_eigenvalue(pelec) << " " << pelec->eferm.ef << "\n";
+}
+
+void Write_MLKEDF_Descriptors::generatePathData_KS(
+    const std::string& out_dir,
+    const int iter,
+    psi::Psi<std::complex<float>> *psi,
+    elecstate::ElecState *pelec,
+    ModulePW::PW_Basis_K *pw_psi,
+    ModulePW::PW_Basis *pw_rho,
+    UnitCell& ucell,
+    const int nrxx
+)
+{
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU> psi_double(*psi);
+    this->generatePathData_KS(out_dir, iter, &psi_double, pelec, pw_psi, pw_rho, ucell, nrxx);
+}
+
+#if ((defined __CUDA) || (defined __ROCM))
+void Write_MLKEDF_Descriptors::generatePathData_KS(
+    const std::string& out_dir,
+    const int iter,
+    psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* psi,
+    elecstate::ElecState *pelec,
+    ModulePW::PW_Basis_K *pw_psi,
+    ModulePW::PW_Basis *pw_rho,
+    UnitCell& ucell,
+    const int nrxx
+)
+{
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU> psi_cpu(*psi);
+    this->generatePathData_KS(out_dir, iter, &psi_cpu, pelec, pw_psi, pw_rho, ucell, nrxx);
+}
+
+void Write_MLKEDF_Descriptors::generatePathData_KS(
+    const std::string& out_dir,
+    const int iter,
+    psi::Psi<std::complex<float>, base_device::DEVICE_GPU>* psi,
+    elecstate::ElecState *pelec,
+    ModulePW::PW_Basis_K *pw_psi,
+    ModulePW::PW_Basis *pw_rho,
+    UnitCell& ucell,
+    const int nrxx
+)
+{
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU> psi_cpu_double(*psi);
+    this->generatePathData_KS(out_dir, iter, &psi_cpu_double, pelec, pw_psi, pw_rho, ucell, nrxx);
+}
+#endif
 
 void Write_MLKEDF_Descriptors::generateTrainData_KS(
     const std::string& out_dir,

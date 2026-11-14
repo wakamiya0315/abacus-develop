@@ -67,9 +67,56 @@ public:
     );
 #endif
 
+    // Fork addition: training labels along the SCF path. Writes, as float32, the output density of
+    // SCF iteration `iter` and the KS labels F and V_P computed from the same orbitals and occupations
+    // to <out_dir>/path/iter_<iter>_{rho,enhancement,pauli}.npy, and appends the V_P reference
+    // energies to <out_dir>/path/meta.txt. Called from ESolver_KS_PW when ABACUS_MLKEDF_PATH_EVERY > 0.
+    void generatePathData_KS(
+        const std::string& out_dir,
+        const int iter,
+        psi::Psi<std::complex<double>> *psi,
+        elecstate::ElecState *pelec,
+        ModulePW::PW_Basis_K *pw_psi,
+        ModulePW::PW_Basis *pw_rho,
+        UnitCell& ucell,
+        const int nrxx
+    );
+    void generatePathData_KS(
+        const std::string& out_dir,
+        const int iter,
+        psi::Psi<std::complex<float>> *psi,
+        elecstate::ElecState *pelec,
+        ModulePW::PW_Basis_K *pw_psi,
+        ModulePW::PW_Basis *pw_rho,
+        UnitCell& ucell,
+        const int nrxx
+    );
+#if ((defined __CUDA) || (defined __ROCM))
+    void generatePathData_KS(
+        const std::string& out_dir,
+        const int iter,
+        psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* psi,
+        elecstate::ElecState *pelec,
+        ModulePW::PW_Basis_K *pw_psi,
+        ModulePW::PW_Basis *pw_rho,
+        UnitCell& ucell,
+        const int nrxx
+    );
+    void generatePathData_KS(
+        const std::string& out_dir,
+        const int iter,
+        psi::Psi<std::complex<float>, base_device::DEVICE_GPU>* psi,
+        elecstate::ElecState *pelec,
+        ModulePW::PW_Basis_K *pw_psi,
+        ModulePW::PW_Basis *pw_rho,
+        UnitCell& ucell,
+        const int nrxx
+    );
+#endif
+
     void generate_descriptor(
         const std::string& out_dir,
-        const double * const *prho, 
+        const double * const *prho,
         ModulePW::PW_Basis *pw_rho,
         std::vector<std::vector<double>> &nablaRho,
         const int nrxx

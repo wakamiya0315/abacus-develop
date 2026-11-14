@@ -27,6 +27,10 @@
 #include "source_pw/module_pwdft/setup_dftu_pw.h"  // mohan add 20250309
 #include "source_pw/module_pwdft/setup_pot.h"      // mohan add 20250929
 #include "source_pw/module_pwdft/update_cell_pw.h" // mohan add 20250309
+#ifdef __MLALGO
+#include "source_io/module_ml/write_mlkedf_desc.h" // fork: ML-KEDF labels along the SCF path
+#include <cstdlib>
+#endif
 
 namespace ModuleESolver
 {
@@ -336,6 +340,29 @@ void ESolver_KS_PW<T, Device>::hamilt2rho_single(UnitCell& ucell, const int iste
 
     // symmetrize the charge density
     module_charge::symmetrize_rho(this->inp_->nspin, this->chr, this->pw_rhod, ucell.symm);
+
+#ifdef __MLALGO
+    // Fork addition: with of_ml_gene_data 1 and ABACUS_MLKEDF_PATH_EVERY=N (N > 0), write the output
+    // density of iterations 1, N, 2N, ... and the KS labels (F, V_P) from the same orbitals and
+    // occupations. At this point chr.rho is the output density (before mixing), consistent with psi and wg.
+    const char* path_every_env = std::getenv("ABACUS_MLKEDF_PATH_EVERY");
+    const int path_every = path_every_env ? std::atoi(path_every_env) : 0;
+    if (this->inp_->of_ml_gene_data == 1 && !skip_charge && path_every > 0 && (iter == 1 || iter % path_every == 0))
+    {
+        ModuleBase::timer::start("ESolver_KS_PW", "mlkedf_path");
+        const Input_para& inp = *this->inp_;
+        ModuleIO::Write_MLKEDF_Descriptors writer;
+        writer.cal_tool->set_para(this->chr.nrxx, inp.nelec, inp.of_tf_weight, inp.of_vw_weight, inp.of_ml_chi_p,
+                                  inp.of_ml_chi_q, inp.of_ml_chi_xi, inp.of_ml_chi_pnl, inp.of_ml_chi_qnl,
+                                  inp.of_ml_nkernel, inp.of_ml_kernel, inp.of_ml_kernel_scaling,
+                                  inp.of_ml_yukawa_alpha, inp.of_ml_kernel_file, ucell.omega, this->pw_rho,
+                                  GlobalV::ofs_running);
+        writer.generatePathData_KS(PARAM.globalv.global_mlkedf_descriptor_dir, iter,
+                                   this->stp.template get_psi_t<T, Device>(), this->pelec, this->pw_wfc,
+                                   this->pw_rho, ucell, this->chr.nrxx);
+        ModuleBase::timer::end("ESolver_KS_PW", "mlkedf_path");
+    }
+#endif
 
     ModuleBase::timer::end("ESolver_KS_PW", "hamilt2rho_single");
 }

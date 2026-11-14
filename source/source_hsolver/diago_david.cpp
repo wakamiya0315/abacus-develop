@@ -27,6 +27,18 @@ namespace
 // ABACUS uses it only for single precision; in double precision the band-by-band
 // Schmidt orthogonalization (GEMV per band plus a host sync) took about 21% of the
 // SCF time for a 600 Ry slab. ABACUS_DAVID_BLOCK_QR=1 enables the cuSOLVER QR path.
+// Share the Davidson S|psi> array with the basis array (fork addition, opt-in).
+// Without USPP, S = 1 and op.spsi only copies; the copy array is 1/3 of the Davidson
+// workspace (basis, hpsi, spsi). ABACUS_DAVID_SHARE_SPSI=1 drops it to save GPU memory.
+bool share_spsi_requested()
+{
+    static const bool requested = [] {
+        const char* value = std::getenv("ABACUS_DAVID_SHARE_SPSI");
+        return value != nullptr && std::string(value) == "1";
+    }();
+    return requested;
+}
+
 bool block_qr_double_requested()
 {
     static const bool requested = [] {
@@ -113,8 +125,16 @@ DiagoDavid<T, Device>::DiagoDavid(const Real* precondition_in,
     setmem_complex_op()(this->hpsi, 0, nbase_x * dim);
 
     // spsi(nbase_x, dim); // the Product of S and psi in the reduced basis set
-    resmem_complex_op()(this->spsi, local_storage, "DAV::spsi");
-    setmem_complex_op()(this->spsi, 0, nbase_x * dim);
+    this->spsi_shares_basis = !this->use_uspp && share_spsi_requested();
+    if (this->spsi_shares_basis)
+    {
+        this->spsi = basis;
+    }
+    else
+    {
+        resmem_complex_op()(this->spsi, local_storage, "DAV::spsi");
+        setmem_complex_op()(this->spsi, 0, nbase_x * dim);
+    }
 
     // hcc(nbase_x, nbase_x); // Hamiltonian on the reduced basis
     resmem_complex_op()(this->hcc, nbase_x * nbase_x, "DAV::hcc");
@@ -144,7 +164,10 @@ DiagoDavid<T, Device>::~DiagoDavid()
 {
     delmem_complex_op()(this->basis);
     delmem_complex_op()(this->hpsi);
-    delmem_complex_op()(this->spsi);
+    if (!this->spsi_shares_basis)
+    {
+        delmem_complex_op()(this->spsi);
+    }
     delmem_complex_op()(this->hcc);
     delmem_complex_op()(this->vcc);
     delmem_complex_op()(this->lagrange_matrix);
@@ -235,7 +258,10 @@ int DiagoDavid<T, Device>::diag_once(const HSOperator<T, Device>& op,
         }
         if (full_rank)
         {
-            op.spsi(basis, spsi, dim, nband);
+            if (!this->spsi_shares_basis)
+            {
+                op.spsi(basis, spsi, dim, nband);
+            }
             initial_orth_done = true;
         }
         else if (std::is_same<Real, float>::value)
@@ -284,7 +310,10 @@ int DiagoDavid<T, Device>::diag_once(const HSOperator<T, Device>& op,
         }
         {
             // phm_in->sPsi(basis + dim*m, &this->spsi[m * dim], dim, dim, 1);
-            op.spsi(basis + dim*m, &this->spsi[m * dim], dim, 1);
+            if (!this->spsi_shares_basis)
+            {
+                op.spsi(basis + dim*m, &this->spsi[m * dim], dim, 1);
+            }
         }
     }
 
@@ -620,7 +649,10 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
     {
         {
             // phm_in->sPsi(basis + dim*(nbase + m), &spsi[(nbase + m) * dim], dim, dim, 1);
-            op.spsi(basis + dim*(nbase + m), &spsi[(nbase + m) * dim], dim, 1);
+            if (!this->spsi_shares_basis)
+            {
+                op.spsi(basis + dim*(nbase + m), &spsi[(nbase + m) * dim], dim, 1);
+            }
         }
     }
     // first nbase bands psi* dot notconv bands spsi to prepare lagrange_matrix
@@ -740,7 +772,10 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
 
         if (full_rank)
         {
-            op.spsi(basis + dim * nbase, spsi + dim * nbase, dim, notconv);
+            if (!this->spsi_shares_basis)
+            {
+                op.spsi(basis + dim * nbase, spsi + dim * nbase, dim, notconv);
+            }
             qr_used = true;
         }
         else
@@ -773,7 +808,10 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
             {
                 valid_indices.push_back(m);
                 // phm_in->sPsi(basis + dim*(nbase + m), &spsi[(nbase + m) * dim], dim, dim, 1);
-                op.spsi(basis + dim * (nbase + m), &spsi[(nbase + m) * dim], dim, 1);
+                if (!this->spsi_shares_basis)
+                {
+                    op.spsi(basis + dim * (nbase + m), &spsi[(nbase + m) * dim], dim, 1);
+                }
             }
         }
 
@@ -787,7 +825,10 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
                 if (src != k)
                 {
                     syncmem_complex_op()(basis + dim * (nbase + k), basis + dim * (nbase + src), dim);
-                    syncmem_complex_op()(spsi + (nbase + k) * dim, spsi + (nbase + src) * dim, dim);
+                    if (!this->spsi_shares_basis)
+                    {
+                        syncmem_complex_op()(spsi + (nbase + k) * dim, spsi + (nbase + src) * dim, dim);
+                    }
                 }
             }
             this->notconv = static_cast<int>(valid_indices.size());
@@ -964,6 +1005,17 @@ void DiagoDavid<T, Device>::refresh(const int& dim,
     ModuleBase::timer::start("DiagoDavid", "refresh");
     const int matrix_ld = std::max(dim, 1);
 
+    if (this->spsi_shares_basis)
+    {
+        // S = 1: the new S|psi> is the new basis (psi_in, already set to basis * vcc
+        // by the caller), so only H|psi> is rotated. basis[0:nband] is free here and
+        // holds hpsi * vcc until it is copied back.
+        ModuleBase::gemm_op<T, Device>()('N', 'N', dim, nband, nbase, this->one,
+                                         hpsi, matrix_ld, vcc, nbase_x, this->zero, basis, matrix_ld);
+        syncmem_complex_op()(hpsi, basis, dim * nband);
+    }
+    else
+    {
     // update hp,sp
     setmem_complex_op()(basis , 0, nbase_x * dim);
 
@@ -1001,6 +1053,7 @@ void DiagoDavid<T, Device>::refresh(const int& dim,
     // hpsi = basis, spsi = basis[nband]
     syncmem_complex_op()(hpsi, basis, dim * nband);
     syncmem_complex_op()(spsi, basis + dim*nband, dim * nband);
+    }
     /*for (int m = 0; m < nband; m++) {
         for (int ig = 0; ig < dim; ig++)
         {

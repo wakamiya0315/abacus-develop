@@ -112,6 +112,9 @@ class DiagoDavid
     const int david_ndim = 4;
     /// whether the SCF uses ultrasoft pseudopotentials
     const bool use_uspp = false;
+    /// fork addition (ABACUS_DAVID_SHARE_SPSI=1, only without USPP): S = 1, so S|basis> is the
+    /// basis itself and spsi points to basis instead of a separate array of the same size
+    bool spsi_shares_basis = false;
     /// number of unconverged eigenvalues
     int notconv = 0;
 

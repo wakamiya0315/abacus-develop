@@ -77,8 +77,11 @@ cmake_dependent_option(ENABLE_LIBRI "Enable LibRI for hybrid functional" OFF
                        "ENABLE_LCAO;ENABLE_MPI" OFF)
 cmake_dependent_option(ENABLE_PEXSI "Enable PEXSI for LCAO" OFF
                        "ENABLE_LCAO;ENABLE_MPI" OFF)
+# Fork change: ML-KEDF (OFDFT, of_ml_gene_data) does not need LCAO; only DeePKS does, and its
+# directory (source_lcao/module_deepks) is added only with ENABLE_LCAO. Allowing MLALGO without LCAO
+# gives a PW-only build with ML-KEDF, which avoids compiling LCAO with the C++20 that PyTorch >= 2.10 needs.
 cmake_dependent_option(ENABLE_MLALGO "Enable the machine learning algorithms"
-                       OFF "ENABLE_LCAO;ENABLE_MPI" OFF)
+                       OFF "ENABLE_MPI" OFF)
 
 # Two-center FFT is only used in LCAO
 cmake_dependent_option(

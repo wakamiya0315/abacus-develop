@@ -7,6 +7,12 @@
 #include "source_base/tool_quit.h"
 
 #include <torch/cuda.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+
+#include "npy.hpp"
+
+#include <cstdlib>
+#include <string>
 
 void KEDF_TS::set_para(const std::string& device_inpt, std::ostream& ofs_running)
 {
@@ -27,6 +33,16 @@ void KEDF_TS::set_para(const std::string& device_inpt, std::ostream& ofs_running
         ModuleBase::WARNING_QUIT("KEDF_TS", "Failed to load kedf_ts.pt (TorchScript module).");
     }
     this->module_.eval();
+    // ABACUS_MLKEDF_TS_NOOPT=1: TorchScriptのグラフ最適化を止める（最適化で数値が変わらないかの切り分け用）
+    if (std::getenv("ABACUS_MLKEDF_TS_NOOPT") != nullptr)
+    {
+        torch::jit::setGraphExecutorOptimize(false);
+        ofs_running << " ML-TS KEDF: TorchScript graph optimization disabled" << std::endl;
+    }
+    for (auto p: this->module_.parameters())
+    {
+        p.set_requires_grad(false);
+    }
     ofs_running << " ML-TS KEDF: loaded kedf_ts.pt on " << (this->device_.is_cuda() ? "GPU" : "CPU") << std::endl;
 }
 
@@ -64,6 +80,21 @@ void KEDF_TS::ts_potential(const double* const* prho, ModulePW::PW_Basis* pw_rho
         rpotential(0, ir) += g[ir] / dV;
     }
     this->ts_energy = tp.item<double>();
+    // ABACUS_MLKEDF_TS_DUMP=N: 最初のN回の呼び出しで、受け取った密度と返したV_P（Ry）を npy に書く（照合用）
+    static int ncall = 0;
+    const char* dump = std::getenv("ABACUS_MLKEDF_TS_DUMP");
+    if (dump != nullptr && ncall < std::atoi(dump))
+    {
+        const long unsigned shape[] = {(long unsigned)pw_rho->nrxx};
+        std::vector<double> buf(prho[0], prho[0] + pw_rho->nrxx);
+        npy::SaveArrayAsNumpy("ts_dump_rho_" + std::to_string(ncall) + ".npy", false, 1, shape, buf);
+        for (int ir = 0; ir < pw_rho->nrxx; ++ir)
+        {
+            buf[ir] = g[ir] / dV;
+        }
+        npy::SaveArrayAsNumpy("ts_dump_vp_" + std::to_string(ncall) + ".npy", false, 1, shape, buf);
+    }
+    ++ncall;
     ModuleBase::timer::end("KEDF_TS", "ts_potential");
 }
 

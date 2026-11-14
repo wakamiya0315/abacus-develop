@@ -267,7 +267,7 @@ class Veff_rdmft : public hamilt::OperatorLCAO<TK, TR>
         this->initialize_HR(ucell_in, GridD_in);
     }
     
-    ~Veff_rdmft<TK, TR>(){};
+    ~Veff_rdmft(){};
 
     /**
      * @brief contributeHR() is used to calculate the HR matrix

@@ -2,10 +2,13 @@
 
 #include "source_base/global_variable.h"
 #include "source_base/module_device/device.h"
+#include "source_base/timer.h"
 #include "source_base/tool_quit.h"
 #include "source_io/module_parameter/parameter.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #if defined(__CUDA)
 #include <cuda_runtime.h>
 #endif
@@ -14,6 +17,22 @@
 
 namespace psi
 {
+
+namespace
+{
+// managed memoryの波動関数で、GPUに置いたままにするk点の数（ABACUS_PSI_MANAGED_KEEP_K、既定0）。
+// 番号が小さい順にこの数のk点はホストへ戻さない。残りは従来どおり計算中の1つだけをGPUに置く。
+// SCFの1反復で全k点を対角化と密度計算の2回たどるので、戻さないk点の分だけ転送が減る。
+// GPUが足りなくなればドライバがmanagedのページを追い出すので、メモリ不足では止まらない（遅くなるだけ）。
+int psi_managed_keep_k()
+{
+    static const int keep = [] {
+        const char* value = std::getenv("ABACUS_PSI_MANAGED_KEEP_K");
+        return value != nullptr ? std::max(0, std::atoi(value)) : 0;
+    }();
+    return keep;
+}
+} // namespace
 
 Range::Range(const size_t range_in)
 {
@@ -475,10 +494,10 @@ void Psi<T, Device>::move_current_k_to_device() const
     {
         return;
     }
+    ModuleBase::timer::start("Psi", "prefetch_k");
     const std::size_t block = static_cast<std::size_t>(this->nbands) * this->nbasis;
-    const T* previous = (this->device_resident_k >= 0 && this->device_resident_k < this->nk)
-                            ? this->psi + static_cast<std::size_t>(this->device_resident_k) * block
-                            : nullptr;
+    const bool evict_previous = this->device_resident_k >= psi_managed_keep_k() && this->device_resident_k < this->nk;
+    const T* previous = evict_previous ? this->psi + static_cast<std::size_t>(this->device_resident_k) * block : nullptr;
     const T* current = this->psi + static_cast<std::size_t>(this->current_k) * block;
     int device = 0;
     cudaGetDevice(&device);
@@ -507,7 +526,10 @@ void Psi<T, Device>::move_current_k_to_device() const
         // prefetchは性能のためのヒントで、失敗してもページフォルトで正しく動く。
         ModuleBase::WARNING("Psi::move_current_k_to_device", "cudaMemPrefetchAsync failed");
     }
+    // 転送の時間を測るために待つ。後に続くGPUの処理は同じストリームでこの転送を待つので、待っても遅くならない。
+    cudaStreamSynchronize(0);
     this->device_resident_k = this->current_k;
+    ModuleBase::timer::end("Psi", "prefetch_k");
 #endif
 }
 

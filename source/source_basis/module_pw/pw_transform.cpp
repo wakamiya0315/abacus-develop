@@ -1,3 +1,4 @@
+#include <type_traits>
 #include "source_base/global_function.h"
 #include "source_base/timer.h"
 #include "source_basis/module_pw/kernels/pw_op.h"
@@ -57,6 +58,16 @@ void PW_Basis::real2recip(const std::complex<FPTYPE>* in,
                           const bool add,
                           const FPTYPE factor) const
 {
+#if defined(__CUDA) || defined(__ROCM)
+    if (std::is_same<FPTYPE, double>::value)
+    {
+        if (this->host_fft_on_gpu())
+        {
+            this->real2recip_host_via_gpu(in, out, add, factor);
+            return;
+        }
+    }
+#endif
     ModuleBase::timer::start(this->classname, "real2recip");
 
     assert(this->gamma_only == false);
@@ -149,6 +160,16 @@ void PW_Basis::real2recip(const std::complex<FPTYPE>* in,
 template <typename FPTYPE>
 void PW_Basis::real2recip(const FPTYPE* in, std::complex<FPTYPE>* out, const bool add, const FPTYPE factor) const
 {
+#if defined(__CUDA) || defined(__ROCM)
+    if (std::is_same<FPTYPE, double>::value)
+    {
+        if (this->host_fft_on_gpu())
+        {
+            this->real2recip_host_via_gpu(in, out, add, factor);
+            return;
+        }
+    }
+#endif
     ModuleBase::timer::start(this->classname, "real2recip");
     const int nrxx_ = this->nrxx;
     const int npw_ = this->npw;
@@ -275,6 +296,16 @@ void PW_Basis::recip2real(const std::complex<FPTYPE>* in,
                           const bool add,
                           const FPTYPE factor) const
 {
+#if defined(__CUDA) || defined(__ROCM)
+    if (std::is_same<FPTYPE, double>::value)
+    {
+        if (this->host_fft_on_gpu())
+        {
+            this->recip2real_host_via_gpu(in, out, add, factor);
+            return;
+        }
+    }
+#endif
     ModuleBase::timer::start(this->classname, "recip2real");
     assert(this->gamma_only == false);
     const int nst_ = this->nst;
@@ -380,6 +411,16 @@ void PW_Basis::recip2real(const std::complex<FPTYPE>* in,
 template <typename FPTYPE>
 void PW_Basis::recip2real(const std::complex<FPTYPE>* in, FPTYPE* out, const bool add, const FPTYPE factor) const
 {
+#if defined(__CUDA) || defined(__ROCM)
+    if (std::is_same<FPTYPE, double>::value)
+    {
+        if (this->host_fft_on_gpu())
+        {
+            this->recip2real_host_via_gpu(in, out, add, factor);
+            return;
+        }
+    }
+#endif
     ModuleBase::timer::start(this->classname, "recip2real");
     const int nst_ = this->nst;
     const int nz_ = this->nz;

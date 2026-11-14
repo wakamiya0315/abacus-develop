@@ -297,6 +297,21 @@ public:
                     const bool add = false,
                     const FPTYPE factor = 1.0) const; // in:(nz, ns)  ; out(nplane,nx*ny)
 
+    /// ホスト配列に対する密度・ポテンシャルの3D FFTを、GPU版の変換で代行する（device=="gpu"、1プロセス/プール、
+    /// 倍精度、gamma_only でない場合）。入力をGPUへ写し、既存の recip2real_gpu / real2recip_gpu を使い、結果をホストへ戻す。
+    /// XC の勾配、Hartree、密度残差、混合などホスト側のFFTが、呼び出し側を変えずにcuFFTになる。
+    /// 環境変数 ABACUS_HOST_FFT_ON_GPU=0 で無効化し、従来の CPU FFT に戻せる（比較用）。
+    bool host_fft_on_gpu() const;
+    void recip2real_host_via_gpu(const std::complex<double>* in, double* out, const bool add, const double factor) const;
+    void recip2real_host_via_gpu(const std::complex<double>* in, std::complex<double>* out, const bool add, const double factor) const;
+    void real2recip_host_via_gpu(const double* in, std::complex<double>* out, const bool add, const double factor) const;
+    void real2recip_host_via_gpu(const std::complex<double>* in, std::complex<double>* out, const bool add, const double factor) const;
+    // float 版は呼ばれない（host_fft_on_gpu の分岐は double のときだけ通る）。テンプレートの float 実体化を通すための宣言。
+    void recip2real_host_via_gpu(const std::complex<float>* in, float* out, const bool add, const float factor) const;
+    void recip2real_host_via_gpu(const std::complex<float>* in, std::complex<float>* out, const bool add, const float factor) const;
+    void real2recip_host_via_gpu(const float* in, std::complex<float>* out, const bool add, const float factor) const;
+    void real2recip_host_via_gpu(const std::complex<float>* in, std::complex<float>* out, const bool add, const float factor) const;
+
     /**
      * @brief Converts data from reciprocal space to real space on Cpu
      *
@@ -446,6 +461,11 @@ protected:
 
   std::string device = "cpu";       ///< cpu or gpu
   std::string precision = "double"; ///< single, double, mixing
+  /// host_fft_on_gpu 用の作業領域（GPU上、初回に確保して再利用）。g は npw、r は nrxx 個の複素数。
+  mutable std::complex<double>* d_host_fft_g_ = nullptr;
+  mutable std::complex<double>* d_host_fft_r_ = nullptr;
+  void ensure_host_fft_buffers() const;
+  void free_host_fft_buffers();
   bool double_data_ = true;         ///<  if has double data
   bool float_data_ = false;         ///< if has float data
 };

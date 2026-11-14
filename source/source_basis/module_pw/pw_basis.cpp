@@ -45,6 +45,7 @@ PW_Basis:: ~PW_Basis()
         delmem_int_op()(this->d_is2fftixy);
         delmem_int_op()(this->ig2ixyz_gpu);
     }
+    this->free_host_fft_buffers();
 #endif
 }
 

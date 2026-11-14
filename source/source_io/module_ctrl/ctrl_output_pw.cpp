@@ -18,7 +18,9 @@
 #include "source_pw/module_pwdft/elecond.h"
 
 #ifdef __MLALGO
-#include "../module_ml/write_mlkedf_desc.h"
+#include "../module_ml/write_mlkedf_desc.h" // also brings ElecStatePW (cal_kedf_label_densities)
+#include <cstdlib>
+#include <string>
 #endif
 
 void ModuleIO::ctrl_iter_pw(const int istep,
@@ -405,14 +407,35 @@ void ModuleIO::ctrl_runner_pw(UnitCell& ucell,
                                              pw_rho,
                                              ofs_running);
 
-        write_mlkedf_desc.generateTrainData_KS(PARAM.globalv.global_mlkedf_descriptor_dir,
-                                               stp.template get_psi_t<T, Device>(),
-                                               pelec,
-                                               pw_wfc,
-                                               pw_rho,
-                                               ucell,
-                                               pelec->pot->get_eff_v(0),
-                                               chr.nrxx);
+        // Fork: build the labels from tau_plus and sum w eps |psi|^2 accumulated on the device
+        // (ElecStatePW::cal_kedf_label_densities). ABACUS_MLKEDF_CPU_LABELS=1 keeps the original
+        // band-by-band CPU route (Cal_MLKEDF_Descriptors::getF_KS), e.g. to compare the two.
+        const char* cpu_labels = std::getenv("ABACUS_MLKEDF_CPU_LABELS");
+        if (cpu_labels != nullptr && std::string(cpu_labels) == "1")
+        {
+            write_mlkedf_desc.generateTrainData_KS(PARAM.globalv.global_mlkedf_descriptor_dir,
+                                                   stp.template get_psi_t<T, Device>(),
+                                                   pelec,
+                                                   pw_wfc,
+                                                   pw_rho,
+                                                   ucell,
+                                                   pelec->pot->get_eff_v(0),
+                                                   chr.nrxx);
+        }
+        else
+        {
+            std::vector<double> tau_plus, eps_rho;
+            static_cast<elecstate::ElecStatePW<T, Device>*>(pelec)->cal_kedf_label_densities(
+                *stp.template get_psi_t<T, Device>(), tau_plus, eps_rho);
+            write_mlkedf_desc.generateTrainData_KS(PARAM.globalv.global_mlkedf_descriptor_dir,
+                                                   pelec,
+                                                   pw_rho,
+                                                   ucell,
+                                                   pelec->pot->get_eff_v(0),
+                                                   chr.nrxx,
+                                                   tau_plus,
+                                                   eps_rho);
+        }
     }
 #endif
 

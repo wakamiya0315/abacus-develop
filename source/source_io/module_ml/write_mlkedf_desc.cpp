@@ -53,6 +53,74 @@ void symmetrize_field(std::vector<double>& field, ModulePW::PW_Basis* pw_rho, Un
     std::complex<double>* gptr = fieldg.data();
     module_charge::cal_rhog_symm(0, &ptr, &gptr, pw_rho->npw, nullptr, pw_rho, ucell.symm);
 }
+// Final outputs shared by both label routes: enhancement.npy, pauli.npy, veff.npy, pauli_reference.txt.
+void write_final_labels(const std::string& out_dir, const elecstate::ElecState* pelec, ModulePW::PW_Basis* pw_rho,
+                        UnitCell& ucell, const double* veff, const int nrxx,
+                        std::vector<double>& enhancement, std::vector<double>& pauli)
+{
+    symmetrize_field(enhancement, pw_rho, ucell);
+    symmetrize_field(pauli, pw_rho, ucell);
+    const long unsigned cshape[] = {(long unsigned) nrxx};
+    npy::SaveArrayAsNumpy(out_dir + "/enhancement.npy", false, 1, cshape, enhancement);
+    npy::SaveArrayAsNumpy(out_dir + "/pauli.npy", false, 1, cshape, pauli);
+    std::vector<double> veff_vec(veff, veff + nrxx);
+    npy::SaveArrayAsNumpy(out_dir + "/veff.npy", false, 1, cshape, veff_vec);
+    std::ofstream ref(out_dir + "/pauli_reference.txt");
+    ref << std::setprecision(15) << "# V_P in pauli.npy = (tau_P - sum_i w_i eps_i |psi_i|^2) / rho + epsilon_M (Ry)\n"
+        << "epsilon_M_Ry " << top_occupied_eigenvalue(pelec) << "\n"
+        << "efermi_Ry " << pelec->eferm.ef << "\n";
+}
+
+// SCF-path outputs (float32): path/iter_<iter>_{rho,enhancement,pauli}.npy and a line in path/meta.txt.
+void write_path_labels(const std::string& out_dir, const int iter, const elecstate::ElecState* pelec,
+                       ModulePW::PW_Basis* pw_rho, UnitCell& ucell, const int nrxx,
+                       std::vector<double>& enhancement, std::vector<double>& pauli)
+{
+    const std::string dir = out_dir + "/path";
+    std::filesystem::create_directories(dir);
+    symmetrize_field(enhancement, pw_rho, ucell);
+    symmetrize_field(pauli, pw_rho, ucell);
+    // float32 halves the storage; the path data are for later training, not for the reference energies.
+    char prefix[32];
+    std::snprintf(prefix, sizeof(prefix), "/iter_%04d_", iter);
+    const long unsigned cshape[] = {(long unsigned) nrxx};
+    std::vector<float> buffer(nrxx);
+    std::copy(pelec->charge->rho[0], pelec->charge->rho[0] + nrxx, buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "rho.npy", false, 1, cshape, buffer);
+    std::copy(enhancement.begin(), enhancement.end(), buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "enhancement.npy", false, 1, cshape, buffer);
+    std::copy(pauli.begin(), pauli.end(), buffer.begin());
+    npy::SaveArrayAsNumpy(dir + prefix + "pauli.npy", false, 1, cshape, buffer);
+    const bool new_file = !std::filesystem::exists(dir + "/meta.txt");
+    std::ofstream meta(dir + "/meta.txt", std::ios::app);
+    if (new_file)
+    {
+        meta << "# iter epsilon_M_Ry efermi_Ry (rho is the output density of the iteration, before mixing)\n";
+    }
+    meta << std::setprecision(15) << iter << " " << top_occupied_eigenvalue(pelec) << " " << pelec->eferm.ef << "\n";
+}
+
+// KS labels from tau_plus = sum w |grad psi|^2 and eps_rho = sum w eps |psi|^2 (both per volume, Ry units),
+// with the same formulas as Cal_MLKEDF_Descriptors::getF_KS:
+//   tau_P = tau_plus - |grad rho|^2 / (8 rho) * 2,  F = tau_P / (c_TF rho^{5/3}),  V_P = (tau_P - eps_rho) / rho + epsilon_M.
+void labels_from_densities(const elecstate::ElecState* pelec, const double c_tf, const int nrxx,
+                           const std::vector<double>& tau_plus, const std::vector<double>& eps_rho,
+                           const std::vector<std::vector<double>>& nabla_rho,
+                           std::vector<double>& enhancement, std::vector<double>& pauli)
+{
+    const double* rho = pelec->charge->rho[0];
+    const double eps_m = top_occupied_eigenvalue(pelec);
+    enhancement.resize(nrxx);
+    pauli.resize(nrxx);
+    for (int ir = 0; ir < nrxx; ++ir)
+    {
+        const double grad2 = nabla_rho[0][ir] * nabla_rho[0][ir] + nabla_rho[1][ir] * nabla_rho[1][ir]
+                             + nabla_rho[2][ir] * nabla_rho[2][ir];
+        const double tau_p = tau_plus[ir] - grad2 / (8. * rho[ir]) * 2.;
+        enhancement[ir] = tau_p / (c_tf * std::pow(rho[ir], 5. / 3.));
+        pauli[ir] = (tau_p - eps_rho[ir]) / rho[ir] + eps_m;
+    }
+}
 } // namespace
 
 void Write_MLKEDF_Descriptors::generateTrainData_KS(
@@ -72,7 +140,21 @@ void Write_MLKEDF_Descriptors::generateTrainData_KS(
     }
 
     std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
+    this->prepare_rho_outputs(out_dir, pelec, pw_rho, nrxx, drho);
 
+    std::vector<double> enhancement(nrxx);
+    std::vector<double> pauli(nrxx);
+
+    this->cal_tool->getF_KS(psi, pelec, pw_psi, pw_rho, ucell, drho, enhancement, pauli);
+    write_final_labels(out_dir, pelec, pw_rho, ucell, veff, nrxx, enhancement, pauli);
+}
+
+void Write_MLKEDF_Descriptors::prepare_rho_outputs(const std::string& out_dir,
+                                                   elecstate::ElecState* pelec,
+                                                   ModulePW::PW_Basis* pw_rho,
+                                                   const int nrxx,
+                                                   std::vector<std::vector<double>>& drho)
+{
     const long unsigned cshape[] = {(long unsigned) nrxx};
     if (labels_only_requested())
     {
@@ -84,29 +166,38 @@ void Write_MLKEDF_Descriptors::generateTrainData_KS(
     {
         this->generate_descriptor(out_dir, pelec->charge->rho, pw_rho, drho, nrxx);
     }
+}
 
-    std::vector<double> enhancement(nrxx);
-    std::vector<double> pauli(nrxx);
+void Write_MLKEDF_Descriptors::generateTrainData_KS(const std::string& out_dir,
+                                                    elecstate::ElecState* pelec,
+                                                    ModulePW::PW_Basis* pw_rho,
+                                                    UnitCell& ucell,
+                                                    const double* veff,
+                                                    const int nrxx,
+                                                    const std::vector<double>& tau_plus,
+                                                    const std::vector<double>& eps_rho)
+{
+    std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
+    this->prepare_rho_outputs(out_dir, pelec, pw_rho, nrxx, drho);
+    std::vector<double> enhancement, pauli;
+    labels_from_densities(pelec, this->cal_tool->cTF, nrxx, tau_plus, eps_rho, drho, enhancement, pauli);
+    write_final_labels(out_dir, pelec, pw_rho, ucell, veff, nrxx, enhancement, pauli);
+}
 
-    this->cal_tool->getF_KS(psi, pelec, pw_psi, pw_rho, ucell, drho, enhancement, pauli);
-
-    symmetrize_field(enhancement, pw_rho, ucell);
-    symmetrize_field(pauli, pw_rho, ucell);
-
-    // output data in .npy format
-    npy::SaveArrayAsNumpy(out_dir + "/enhancement.npy", false, 1, cshape, enhancement);
-    npy::SaveArrayAsNumpy(out_dir + "/pauli.npy", false, 1, cshape, pauli);
-
-    for (int ir = 0; ir < nrxx; ++ir)
-    {
-        enhancement[ir] = veff[ir];
-    }
-    npy::SaveArrayAsNumpy(out_dir + "/veff.npy", false, 1, cshape, enhancement);
-
-    std::ofstream ref(out_dir + "/pauli_reference.txt");
-    ref << std::setprecision(15) << "# V_P in pauli.npy = (tau_P - sum_i w_i eps_i |psi_i|^2) / rho + epsilon_M (Ry)\n"
-        << "epsilon_M_Ry " << top_occupied_eigenvalue(pelec) << "\n"
-        << "efermi_Ry " << pelec->eferm.ef << "\n";
+void Write_MLKEDF_Descriptors::generatePathData_KS(const std::string& out_dir,
+                                                   const int iter,
+                                                   elecstate::ElecState* pelec,
+                                                   ModulePW::PW_Basis* pw_rho,
+                                                   UnitCell& ucell,
+                                                   const int nrxx,
+                                                   const std::vector<double>& tau_plus,
+                                                   const std::vector<double>& eps_rho)
+{
+    std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
+    this->cal_tool->getNablaRho(pelec->charge->rho, pw_rho, drho);
+    std::vector<double> enhancement, pauli;
+    labels_from_densities(pelec, this->cal_tool->cTF, nrxx, tau_plus, eps_rho, drho, enhancement, pauli);
+    write_path_labels(out_dir, iter, pelec, pw_rho, ucell, nrxx, enhancement, pauli);
 }
 
 void Write_MLKEDF_Descriptors::generatePathData_KS(
@@ -120,36 +211,12 @@ void Write_MLKEDF_Descriptors::generatePathData_KS(
     const int nrxx
 )
 {
-    const std::string dir = out_dir + "/path";
-    std::filesystem::create_directories(dir);
-
     std::vector<std::vector<double>> drho(3, std::vector<double>(nrxx, 0.));
     this->cal_tool->getNablaRho(pelec->charge->rho, pw_rho, drho);
     std::vector<double> enhancement(nrxx);
     std::vector<double> pauli(nrxx);
     this->cal_tool->getF_KS(psi, pelec, pw_psi, pw_rho, ucell, drho, enhancement, pauli);
-    symmetrize_field(enhancement, pw_rho, ucell);
-    symmetrize_field(pauli, pw_rho, ucell);
-
-    // float32 halves the storage; the path data are for later training, not for the reference energies.
-    char prefix[32];
-    std::snprintf(prefix, sizeof(prefix), "/iter_%04d_", iter);
-    const long unsigned cshape[] = {(long unsigned) nrxx};
-    std::vector<float> buffer(nrxx);
-    std::copy(pelec->charge->rho[0], pelec->charge->rho[0] + nrxx, buffer.begin());
-    npy::SaveArrayAsNumpy(dir + prefix + "rho.npy", false, 1, cshape, buffer);
-    std::copy(enhancement.begin(), enhancement.end(), buffer.begin());
-    npy::SaveArrayAsNumpy(dir + prefix + "enhancement.npy", false, 1, cshape, buffer);
-    std::copy(pauli.begin(), pauli.end(), buffer.begin());
-    npy::SaveArrayAsNumpy(dir + prefix + "pauli.npy", false, 1, cshape, buffer);
-
-    const bool new_file = !std::filesystem::exists(dir + "/meta.txt");
-    std::ofstream meta(dir + "/meta.txt", std::ios::app);
-    if (new_file)
-    {
-        meta << "# iter epsilon_M_Ry efermi_Ry (rho is the output density of the iteration, before mixing)\n";
-    }
-    meta << std::setprecision(15) << iter << " " << top_occupied_eigenvalue(pelec) << " " << pelec->eferm.ef << "\n";
+    write_path_labels(out_dir, iter, pelec, pw_rho, ucell, nrxx, enhancement, pauli);
 }
 
 void Write_MLKEDF_Descriptors::generatePathData_KS(

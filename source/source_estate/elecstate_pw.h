@@ -38,6 +38,15 @@ class ElecStatePW : public ElecState
 
     void cal_tau(const psi::Psi<T, Device>& psi) override;
 
+    //! Fork addition (ML-KEDF training labels, nspin = 1): accumulate on the device, from the current
+    //! psi, wg and ekb, the two densities that define the KS Pauli labels, and copy them to the host:
+    //!   tau_plus(r) = sum_{k,b} wg_kb |grad psi_kb(r)|^2 / Omega   (no factor 1/2, i.e. Ry units, as kin_r)
+    //!   eps_rho(r)  = sum_{k,b} wg_kb eps_kb |psi_kb(r)|^2 / Omega   (Ry / bohr^3)
+    //! Bands with wg < threshold_wg are skipped, as in Cal_MLKEDF_Descriptors::getF_KS.
+    void cal_kedf_label_densities(const psi::Psi<T, Device>& psi,
+                                  std::vector<double>& tau_plus,
+                                  std::vector<double>& eps_rho);
+
     double get_spin_constrain_energy() override;
 
     //! calculate becsum for uspp

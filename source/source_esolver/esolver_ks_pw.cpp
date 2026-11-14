@@ -357,9 +357,12 @@ void ESolver_KS_PW<T, Device>::hamilt2rho_single(UnitCell& ucell, const int iste
                                   inp.of_ml_nkernel, inp.of_ml_kernel, inp.of_ml_kernel_scaling,
                                   inp.of_ml_yukawa_alpha, inp.of_ml_kernel_file, ucell.omega, this->pw_rho,
                                   GlobalV::ofs_running);
-        writer.generatePathData_KS(PARAM.globalv.global_mlkedf_descriptor_dir, iter,
-                                   this->stp.template get_psi_t<T, Device>(), this->pelec, this->pw_wfc,
-                                   this->pw_rho, ucell, this->chr.nrxx);
+        // tau_plus and sum w eps |psi|^2 on the device; the band-by-band CPU route costs minutes per call.
+        std::vector<double> tau_plus, eps_rho;
+        static_cast<elecstate::ElecStatePW<T, Device>*>(this->pelec)
+            ->cal_kedf_label_densities(*this->stp.template get_psi_t<T, Device>(), tau_plus, eps_rho);
+        writer.generatePathData_KS(PARAM.globalv.global_mlkedf_descriptor_dir, iter, this->pelec, this->pw_rho,
+                                   ucell, this->chr.nrxx, tau_plus, eps_rho);
         ModuleBase::timer::end("ESolver_KS_PW", "mlkedf_path");
     }
 #endif

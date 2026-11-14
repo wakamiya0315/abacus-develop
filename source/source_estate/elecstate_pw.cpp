@@ -306,6 +306,66 @@ void ElecStatePW<T, Device>::rhoBandK(const psi::Psi<T, Device>& psi)
 }
 
 template <typename T, typename Device>
+void ElecStatePW<T, Device>::cal_kedf_label_densities(const psi::Psi<T, Device>& psi,
+                                                      std::vector<double>& tau_plus,
+                                                      std::vector<double>& eps_rho)
+{
+    ModuleBase::TITLE("ElecStatePW", "cal_kedf_label_densities");
+    ModuleBase::timer::start("ElecStatePW", "cal_kedf_label_densities");
+    this->init_rho_data();
+    const int nrxx = this->charge->nrxx;
+    Real* tau_d = nullptr;
+    Real* eps_d = nullptr;
+    resmem_var_op()(tau_d, nrxx);
+    resmem_var_op()(eps_d, nrxx);
+    setmem_var_op()(tau_d, 0, nrxx);
+    setmem_var_op()(eps_d, 0, nrxx);
+    Real* tau_arr[1] = {tau_d};
+    Real* eps_arr[1] = {eps_d};
+    for (int ik = 0; ik < psi.get_nk(); ++ik)
+    {
+        psi.fix_k(ik);
+        const int npw = psi.get_current_ngk();
+        for (int ibnd = 0; ibnd < psi.get_nbands(); ++ibnd)
+        {
+            if (this->wg(ik, ibnd) < ModuleBase::threshold_wg)
+            {
+                continue;
+            }
+            const auto w1 = static_cast<Real>(this->wg(ik, ibnd) / ucell->omega);
+            const auto w1_eps = static_cast<Real>(this->wg(ik, ibnd) * this->ekb(ik, ibnd) / ucell->omega);
+            // sum_b w eps |psi|^2
+            this->basis->recip_to_real(this->ctx, &psi(ibnd, 0), this->wfcr, ik);
+            elecstate_pw_op()(this->ctx, 0, this->basis->nrxx, nrxx, w1_eps, eps_arr, this->wfcr);
+            // sum_b w |grad psi|^2, the same loop as kin_r in rhoBandK
+            for (int j = 0; j < 3; j++)
+            {
+                setmem_complex_op()(this->wfcr, 0, nrxx);
+                meta_op()(this->ctx,
+                          ik,
+                          j,
+                          npw,
+                          this->basis->npwk_max,
+                          static_cast<Real>(ucell->tpiba),
+                          this->basis->template get_gcar_data<Real>(),
+                          this->basis->template get_kvec_c_data<Real>(),
+                          &psi(ibnd, 0),
+                          this->wfcr);
+                this->basis->recip_to_real(this->ctx, this->wfcr, this->wfcr, ik);
+                elecstate_pw_op()(this->ctx, 0, nrxx, nrxx, w1, tau_arr, this->wfcr);
+            }
+        }
+    }
+    tau_plus.resize(nrxx);
+    eps_rho.resize(nrxx);
+    castmem_var_d2h_op()(tau_plus.data(), tau_d, nrxx);
+    castmem_var_d2h_op()(eps_rho.data(), eps_d, nrxx);
+    delmem_var_op()(tau_d);
+    delmem_var_op()(eps_d);
+    ModuleBase::timer::end("ElecStatePW", "cal_kedf_label_densities");
+}
+
+template <typename T, typename Device>
 void ElecStatePW<T, Device>::cal_becsum(const psi::Psi<T, Device>& psi)
 {
     this->becsum_.assign(uspp_becsum_size(*ucell, *ppcell, PARAM.inp.nspin), 0.0);

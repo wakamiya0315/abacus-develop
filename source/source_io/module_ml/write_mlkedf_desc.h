@@ -114,6 +114,33 @@ public:
     );
 #endif
 
+    // Fork addition: the same outputs, with the KS labels built from tau_plus = sum w |grad psi|^2 and
+    // eps_rho = sum w eps |psi|^2 accumulated on the device (ElecStatePW::cal_kedf_label_densities)
+    // instead of the band-by-band CPU FFTs of Cal_MLKEDF_Descriptors::getF_KS.
+    void generateTrainData_KS(const std::string& out_dir,
+                              elecstate::ElecState* pelec,
+                              ModulePW::PW_Basis* pw_rho,
+                              UnitCell& ucell,
+                              const double* veff,
+                              const int nrxx,
+                              const std::vector<double>& tau_plus,
+                              const std::vector<double>& eps_rho);
+    void generatePathData_KS(const std::string& out_dir,
+                             const int iter,
+                             elecstate::ElecState* pelec,
+                             ModulePW::PW_Basis* pw_rho,
+                             UnitCell& ucell,
+                             const int nrxx,
+                             const std::vector<double>& tau_plus,
+                             const std::vector<double>& eps_rho);
+
+    // rho.npy only (ABACUS_MLKEDF_LABELS_ONLY=1) or all descriptors; fills nablaRho in both cases.
+    void prepare_rho_outputs(const std::string& out_dir,
+                             elecstate::ElecState* pelec,
+                             ModulePW::PW_Basis* pw_rho,
+                             const int nrxx,
+                             std::vector<std::vector<double>>& nablaRho);
+
     void generate_descriptor(
         const std::string& out_dir,
         const double * const *prho,

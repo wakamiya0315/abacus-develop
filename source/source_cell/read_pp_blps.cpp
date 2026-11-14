@@ -1,6 +1,13 @@
 #include "read_pp.h"
 #include "source_base/atom_in.h"
 #include "source_base/element_name.h"
+#include "source_base/global_variable.h"
+#include "source_base/tool_quit.h"
+
+#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <vector>
 
 int Pseudopot_upf::read_pseudo_blps(std::ifstream &ifs, Atom_pseudo& pp)
 {
@@ -157,3 +164,75 @@ int Pseudopot_upf::read_pseudo_blps(std::ifstream &ifs, Atom_pseudo& pp)
 //jchi           -
 //jjj            -
 //nd             -
+
+bool Pseudopot_upf::read_blps_rhoatom(const std::string& fn, Atom_pseudo& pp)
+{
+    std::ifstream ifs(fn.c_str());
+    if (!ifs)
+    {
+        return false;
+    }
+    std::vector<double> r_in;
+    std::vector<double> rho_in;
+    std::string line;
+    while (std::getline(ifs, line))
+    {
+        if (line.empty() || line[0] == '#')
+        {
+            continue;
+        }
+        std::istringstream iss(line);
+        double r = 0.0;
+        double rho = 0.0;
+        if (iss >> r >> rho)
+        {
+            r_in.push_back(r);
+            rho_in.push_back(rho);
+        }
+    }
+    if (r_in.size() < 2)
+    {
+        ModuleBase::WARNING_QUIT("read_blps_rhoatom", "too few points in " + fn);
+    }
+    for (std::size_t i = 1; i < r_in.size(); ++i)
+    {
+        if (!(r_in[i] > r_in[i - 1]))
+        {
+            ModuleBase::WARNING_QUIT("read_blps_rhoatom", "r must increase in " + fn);
+        }
+    }
+    // PPのメッシュへ線形補間する（範囲外は0）。
+    std::size_t j = 0;
+    for (int i = 0; i < pp.mesh; ++i)
+    {
+        const double r = pp.r[i];
+        if (r < r_in.front() || r > r_in.back())
+        {
+            pp.rho_at[i] = 0.0;
+            continue;
+        }
+        while (j + 1 < r_in.size() - 1 && r_in[j + 1] < r)
+        {
+            ++j;
+        }
+        const double t = (r - r_in[j]) / (r_in[j + 1] - r_in[j]);
+        pp.rho_at[i] = (1.0 - t) * rho_in[j] + t * rho_in[j + 1];
+    }
+    // 積分 ∫ 4πr²ρ dr が価電子数 zv になるよう規格化する（rab は read_pseudo_blps と同じ台形の重み）。
+    double charge = 0.0;
+    for (int i = 0; i < pp.mesh; ++i)
+    {
+        charge += pp.rho_at[i] * pp.rab[i];
+    }
+    if (!(charge > 0.0))
+    {
+        ModuleBase::WARNING_QUIT("read_blps_rhoatom", "non-positive charge in " + fn);
+    }
+    for (int i = 0; i < pp.mesh; ++i)
+    {
+        pp.rho_at[i] *= pp.zv / charge;
+    }
+    GlobalV::ofs_running << " Atomic valence density for the initial charge read from " << fn << " (integral "
+                         << charge << " before scaling to zv = " << pp.zv << ")" << std::endl;
+    return true;
+}

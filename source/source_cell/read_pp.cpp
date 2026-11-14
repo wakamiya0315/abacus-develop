@@ -55,6 +55,10 @@ int Pseudopot_upf::init_pseudo_reader(const std::string &fn, std::string &type, 
     else if (type == "blps")
     {
         info = read_pseudo_blps(ifs, pp);
+        if (info == 0)
+        {
+            read_blps_rhoatom(fn + ".rhoatom", pp);
+        }
     }
     else
     {

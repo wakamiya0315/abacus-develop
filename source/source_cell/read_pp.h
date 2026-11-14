@@ -179,6 +179,19 @@ public:
     int read_pseudo_blps(std::ifstream& ifs, Atom_pseudo& pp);
 
     /**
+     * @brief blpsの原子価電子密度を補助ファイルから読む。
+     *
+     * blps（psp6/psp8の局所PP）は原子密度を持たず、read_pseudo_blps は 4πr²ρ を一定（ρ ∝ 1/r²）とする。
+     * これは初期密度として悪く、真空のあるスラブではSCFの反復が大きく増える。
+     * fn（"<PPファイル名>.rhoatom"）があれば、2列（r [bohr]、4πr²ρ(r) [e/bohr]）を読んで rho_at を置き換える。
+     * PPのメッシュへ線形補間し、範囲外は0とし、積分が zv（価電子数）になるよう規格化する。ファイルが無ければ何もしない。
+     * 影響するのは初期密度（init_chg=atomic）だけで、局所ポテンシャルと収束後のエネルギーは変わらない。
+     *
+     * @return 読んだら true
+     */
+    bool read_blps_rhoatom(const std::string& fn, Atom_pseudo& pp);
+
+    /**
      * @brief Read pseudopotential header.
      *
      * @param ifs input file stream

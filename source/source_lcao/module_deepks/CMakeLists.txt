@@ -1,4 +1,5 @@
-if(ENABLE_MLALGO)
+# Fork: DeePKS needs the LCAO objects; with MLALGO but without LCAO only ML-KEDF is built.
+if(ENABLE_MLALGO AND ENABLE_LCAO)
   list(
     APPEND
     objects

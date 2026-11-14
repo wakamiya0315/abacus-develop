@@ -692,7 +692,10 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
 
 #if defined(__CUDA)
     bool qr_used = false;
-    const bool block_qr = this->use_block_qr() && notconv > 0;
+    // A single unconverged band goes through the Schmidt path: the block projection below
+    // would call gemm with n = 1, which crashes inside cuBLAS 13 (cublasLtZZZMatmul) on
+    // H100. The rest of this file already uses gemv for n = 1 for the same reason.
+    const bool block_qr = this->use_block_qr() && notconv > 1;
     if (block_qr)
     {
         // Keep a copy of the unprojected block so a rank-deficient QR can

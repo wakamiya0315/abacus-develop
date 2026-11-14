@@ -9,6 +9,7 @@
 #include "kedf_extwt.h"
 #include "kedf_xwm.h"
 #include "kedf_ml.h"
+#include "kedf_ts.h"
 
 struct Input_para;
 
@@ -27,6 +28,7 @@ class KEDF_Manager
         delete this->xwm_;
 #ifdef __MLALGO
         delete this->ml_;
+        delete this->ts_;
 #endif
     }
 
@@ -81,6 +83,7 @@ private:
     void init_lkt(const Input_para& inp, double dV);
 #ifdef __MLALGO
     void init_ml(const Input_para& inp, ModulePW::PW_Basis* pw_rho, double dV, double nelec);
+    void init_ts(const Input_para& inp);
 #endif
 
     KEDF_LKT* lkt_ = nullptr; // Luo-Karasiev-Trickey KEDF
@@ -91,6 +94,7 @@ private:
     KEDF_XWM* xwm_ = nullptr; // Xu-Wang-Ma KEDF
 #ifdef __MLALGO
     KEDF_ML* ml_ = nullptr;   // Machine Learning KEDF
+    KEDF_TS* ts_ = nullptr;   // Pauli KEDF from a TorchScript module (ml-ts)
 #endif
 
     std::string of_kinetic_ = "wt";  // Kinetic energy functional, such as TF, VW, WT

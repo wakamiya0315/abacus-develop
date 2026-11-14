@@ -24,6 +24,7 @@ void ReadInput::item_ofdft()
 * xwm: XWM functional
 * lkt: Luo-Karasiev-Trickey (LKT) functional
 * ml: Machine learning KEDF
+* ml-ts: vW + Pauli KEDF from a TorchScript module kedf_ts.pt (one MPI process)
 * mpn: MPN KEDF (automatically sets ml parameters)
 * cpn5: CPN5 KEDF (automatically sets ml parameters))";
         item.default_value = "wt";
@@ -31,7 +32,7 @@ void ReadInput::item_ofdft()
         item.set_availability("esolver_type==ofdft");
         item.check_value = [](const Input_Item& item, const Parameter& para) {
 #ifndef __MLALGO
-            if (para.input.of_kinetic == "ml" || para.input.of_kinetic == "mpn" || para.input.of_kinetic == "cpn5")
+            if (para.input.of_kinetic == "ml" || para.input.of_kinetic == "ml-ts" || para.input.of_kinetic == "mpn" || para.input.of_kinetic == "cpn5")
             {
                 ModuleBase::WARNING_QUIT("ReadInput", "Error: ML KEDF requires ENABLE_MLALGO option.\n "
                                                       "Please enable ENABLE_MLALGO during compilation to use this feature.");
@@ -40,9 +41,9 @@ void ReadInput::item_ofdft()
             if (para.input.of_kinetic != "tf" && para.input.of_kinetic != "vw" && para.input.of_kinetic != "wt"
                 && para.input.of_kinetic != "ext-wt"
                 && para.input.of_kinetic != "xwm" && para.input.of_kinetic != "lkt" && para.input.of_kinetic != "tf+" 
-                && para.input.of_kinetic != "ml" && para.input.of_kinetic != "mpn" && para.input.of_kinetic != "cpn5")
+                && para.input.of_kinetic != "ml" && para.input.of_kinetic != "ml-ts" && para.input.of_kinetic != "mpn" && para.input.of_kinetic != "cpn5")
             {
-                ModuleBase::WARNING_QUIT("ReadInput", "of_kinetic must be tf, vw, tf+, wt, ext-wt, xwm, lkt, ml, mpn, or cpn5");
+                ModuleBase::WARNING_QUIT("ReadInput", "of_kinetic must be tf, vw, tf+, wt, ext-wt, xwm, lkt, ml, ml-ts, mpn, or cpn5");
             }
         };
         item.reset_value = [](const Input_Item& item, Parameter& para) {

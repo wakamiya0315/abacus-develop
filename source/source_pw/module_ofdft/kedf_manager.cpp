@@ -27,6 +27,7 @@ void KEDF_Manager::init(
     this->init_lkt(inp, dV);
 #ifdef __MLALGO
     this->init_ml(inp, pw_rho, dV, nelec);
+    this->init_ts(inp);
 #endif
 }
 
@@ -53,7 +54,8 @@ void KEDF_Manager::init_vw(const Input_para& inp, double dV)
     //! vW, TF+, WT, XWM, and LKT KEDFs
     if (this->of_kinetic_ == "vw" || this->of_kinetic_ == "tf+" || this->of_kinetic_ == "wt"
         || this->of_kinetic_ == "ext-wt"
-        || this->of_kinetic_ == "xwm" || this->of_kinetic_ == "lkt" || this->of_kinetic_ == "ml")
+        || this->of_kinetic_ == "xwm" || this->of_kinetic_ == "lkt" || this->of_kinetic_ == "ml"
+        || this->of_kinetic_ == "ml-ts")
     {
         if (this->vw_ == nullptr)
         {
@@ -231,6 +233,10 @@ void KEDF_Manager::get_potential(
         this->ml_->ml_potential(prho, pw_rho, rpot);
         this->tf_->get_energy(prho); // temp
     }
+    if (this->of_kinetic_ == "ml-ts")
+    {
+        this->ts_->ts_potential(prho, pw_rho, rpot);
+    }
 #endif
 
     // Before call vw_potential, change rpot to rpot * 2 * pphi
@@ -292,7 +298,8 @@ double KEDF_Manager::get_energy() const
         || this->of_kinetic_ == "ext-wt"
         || this->of_kinetic_ == "xwm" 
         || this->of_kinetic_ == "lkt" 
-        || this->of_kinetic_ == "ml")
+        || this->of_kinetic_ == "ml"
+        || this->of_kinetic_ == "ml-ts")
     {
         kinetic_energy += this->vw_->vw_energy;
     }
@@ -326,6 +333,10 @@ double KEDF_Manager::get_energy() const
             GlobalV::ofs_running << " ML Term = " << this->ml_->ml_energy 
             << " Ry, TF Term = " << this->tf_->tf_energy << " Ry." << std::endl;
         }
+    }
+    if (this->of_kinetic_ == "ml-ts")
+    {
+        kinetic_energy += this->ts_->ts_energy;
     }
 #endif
 
@@ -468,9 +479,9 @@ void KEDF_Manager::get_stress(
         this->lkt_->get_stress(prho, pw_rho);
         kinetic_stress_ += this->lkt_->stress;
     }
-    if (this->of_kinetic_ == "ml")
+    if (this->of_kinetic_ == "ml" || this->of_kinetic_ == "ml-ts")
     {
-        std::cout << "Sorry, the stress of MPN KEDF is not yet supported." << std::endl;
+        std::cout << "Sorry, the stress of ML KEDF is not yet supported." << std::endl;
     }
 
     ModuleBase::timer::end("KEDF_Manager", "get_stress");
@@ -489,7 +500,8 @@ void KEDF_Manager::record_energy(
     }
     if (this->of_kinetic_ == "vw" || this->of_kinetic_ == "tf+" || this->of_kinetic_ == "wt"
         || this->of_kinetic_ == "ext-wt"
-        || this->of_kinetic_ == "xwm" || this->of_kinetic_ == "lkt" || this->of_kinetic_ == "ml")
+        || this->of_kinetic_ == "xwm" || this->of_kinetic_ == "lkt" || this->of_kinetic_ == "ml"
+        || this->of_kinetic_ == "ml-ts")
     {
         titles.push_back("vW KEDF");
         energies_Ry.push_back(this->vw_->vw_energy);
@@ -520,6 +532,11 @@ void KEDF_Manager::record_energy(
         titles.push_back("MPN KEDF");
         energies_Ry.push_back(this->ml_->ml_energy);
     }
+    if (this->of_kinetic_ == "ml-ts")
+    {
+        titles.push_back("ML-TS KEDF");
+        energies_Ry.push_back(this->ts_->ts_energy);
+    }
 #endif
 }
 
@@ -534,3 +551,18 @@ void KEDF_Manager::generate_ml_target(
     this->ml_->gen_training_data(prho, pw_rho, veff);
 #endif
 }
+
+#ifdef __MLALGO
+void KEDF_Manager::init_ts(const Input_para& inp)
+{
+    //! Pauli KEDF from a TorchScript module (kedf_ts.pt); vW is added separately with of_vw_weight
+    if (this->of_kinetic_ == "ml-ts")
+    {
+        if (this->ts_ == nullptr)
+        {
+            this->ts_ = new KEDF_TS();
+        }
+        this->ts_->set_para(inp.of_ml_device, GlobalV::ofs_running);
+    }
+}
+#endif

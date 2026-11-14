@@ -28,6 +28,7 @@ if(ENABLE_MLALGO)
     hamilt_mlkedf_srcs
     kedf_ml.cpp
     kedf_ml_label.cpp
+    kedf_ts.cpp
     ml_base.cpp
     ml_base_pot.cpp
     nn_of.cpp)

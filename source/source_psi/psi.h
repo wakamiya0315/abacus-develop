@@ -32,6 +32,11 @@ struct Range
 
 // there is the structure of electric wavefunction coefficient
 // the basic operations defined in the Operator Class
+/// Constructor 4 の目印。managed memoryの配列を共有する、所有しない参照を作る。
+struct ManagedView
+{
+};
+
 template <typename T, typename Device = base_device::DEVICE_CPU>
 class Psi
 {
@@ -47,10 +52,21 @@ class Psi
 
     // Constructor 2-2: initialize a new psi from the given psi_in with a different class template
     // in this case, psi_in may have a different device type.
-    // managed_storage_in = true（CUDA版、CPUからGPUへの複製のみ）: 全k点の波動関数をCUDA managed memoryに置き、
-    // fix_k で現在のk点の分だけをGPUへ移す。GPUの常駐量は1k点分になり、VRAMを超える波動関数も扱える。
     template <typename T_in, typename Device_in = Device>
-    Psi(const Psi<T_in, Device_in>& psi_in, const bool managed_storage_in = false);
+    Psi(const Psi<T_in, Device_in>& psi_in);
+
+    // Constructor 4（CUDA版）: CUDA managed memoryにある managed_in と同じ配列を共有する、所有しない参照を作る。
+    // ホスト側（psi_cpu）と計算用のGPU側を1つの配列で持ち、ホストメモリでの二重持ちを避ける。
+    // GPU側の参照では fix_k のたびに、前のk点をホストへ、現在のk点をGPUへ移す（GPUの常駐は1k点分）。
+    template <typename Device_in>
+    Psi(const Psi<T, Device_in>& managed_in, ManagedView);
+
+    /// CUDA版: 配列をCUDA managed memoryに置き直す。内容は捨てるので、確保の直後（初期化の前）に呼ぶ。
+    void use_managed_memory();
+    bool is_managed() const
+    {
+        return this->managed_storage;
+    }
 
     // Constructor 3-1: 2D Psi version
     // used in hsolver-pw function pointer and somewhere.
@@ -166,11 +182,9 @@ class Psi
 
     bool allocate_inside = true; ///< whether allocate psi inside Psi class
 
-    /// 波動関数がCUDA managed memoryにある（Constructor 2-2 の managed_storage_in）。
-    bool managed_storage = false;
-    /// managed memoryのとき、GPUに置いているk点（-1はなし）。
-    mutable int device_resident_k = -1;
-    /// managed memoryのとき、前のk点をホストへ戻し、現在のk点をGPUへ移す（性能のためのヒントで、正しさはCUDAが保証する）。
+    bool managed_storage = false;      ///< 配列がCUDA managed memoryにある（所有するときはcudaFreeで解放する）
+    mutable int device_resident_k = -1; ///< managed memoryのGPU側の参照で、GPUへ移したk点（-1はなし）
+    /// 前のk点をホストへ、現在のk点をGPUへprefetchする。性能のためのヒントで、正しさはCUDAのページ移動が保証する。
     void move_current_k_to_device() const;
 
 #ifdef __DSP

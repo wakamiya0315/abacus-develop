@@ -10,7 +10,36 @@
 
 #include <cstdlib>
 #include <string>
-#include <type_traits>
+
+namespace
+{
+// ABACUS_PSI_MANAGED=1（CUDA版）: 全k点の波動関数をCUDA managed memoryに置き、ホスト側（psi_cpu）と
+// GPU側で同じ配列を共有する。GPUには計算中のk点だけを置くので、VRAMの常駐量が全k点分から1k点分に減る。
+// k点の出し入れはSCF反復ごとに対角化と密度計算の2回で、1k点あたり数GB・PCIeで0.1〜0.3秒程度。
+bool psi_managed_requested()
+{
+    const char* value = std::getenv("ABACUS_PSI_MANAGED");
+    return value != nullptr && std::string(value) == "1";
+}
+
+// 対応するのはCUDA版の倍精度だけ。それ以外の組み合わせでは nullptr を返す。
+template <typename T, typename Device>
+psi::Psi<T, Device>* make_managed_view(psi::Psi<std::complex<double>, base_device::DEVICE_CPU>&)
+{
+    return nullptr;
+}
+
+#if defined(__CUDA)
+template <>
+psi::Psi<std::complex<double>, base_device::DEVICE_GPU>* make_managed_view<std::complex<double>,
+                                                                           base_device::DEVICE_GPU>(
+    psi::Psi<std::complex<double>, base_device::DEVICE_CPU>& host)
+{
+    host.use_managed_memory();
+    return new psi::Psi<std::complex<double>, base_device::DEVICE_GPU>(host, psi::ManagedView{});
+}
+#endif
+} // namespace
 
 Setup_Psi_pw::Setup_Psi_pw()
 {
@@ -75,23 +104,20 @@ void Setup_Psi_pw::before_runner_impl(const UnitCell& ucell,
 
     if (inp.device == "gpu" || inp.precision == "single")
     {
-        // ABACUS_PSI_MANAGED=1（CUDA版）: 全k点の波動関数をCUDA managed memoryに置き、計算中のk点だけをGPUへ移す。
-        // GPUの常駐量が全k点分から1k点分に減る。k点の出し入れはSCF反復ごとに対角化と密度計算の2回。
-        const char* managed_env = std::getenv("ABACUS_PSI_MANAGED");
-        const bool managed = std::is_same<Device, base_device::DEVICE_GPU>::value && managed_env != nullptr
-                             && std::string(managed_env) == "1";
-#if !defined(__CUDA)
-        if (managed)
+        psi::Psi<T, Device>* managed_view = nullptr;
+        if (inp.device == "gpu" && psi_managed_requested())
         {
-            ModuleBase::WARNING_QUIT("Setup_Psi_pw", "ABACUS_PSI_MANAGED=1 needs the CUDA build");
+            managed_view = make_managed_view<T, Device>(this->psi_cpu[0]);
+            if (managed_view == nullptr)
+            {
+                ModuleBase::WARNING_QUIT("Setup_Psi_pw",
+                                         "ABACUS_PSI_MANAGED=1 supports only double precision in the CUDA build");
+            }
+            GlobalV::ofs_running << " Wave functions of all k-points share one CUDA managed array between host and GPU"
+                                 << " (ABACUS_PSI_MANAGED=1); only the current k-point is kept on the GPU." << std::endl;
         }
-#endif
-        if (managed)
-        {
-            GlobalV::ofs_running << " Wave functions of all k-points are kept in CUDA managed memory"
-                                 << " (ABACUS_PSI_MANAGED=1); only the current k-point resides on the GPU." << std::endl;
-        }
-        this->psi_t = static_cast<void*>(new psi::Psi<T, Device>(this->psi_cpu[0], managed));
+        this->psi_t = static_cast<void*>(managed_view != nullptr ? managed_view
+                                                                 : new psi::Psi<T, Device>(this->psi_cpu[0]));
     }
     else
     {
@@ -247,9 +273,13 @@ template <typename T, typename Device>
 void Setup_Psi_pw::copy_d2h_impl()
 {
     auto* psi_t = this->get_psi_t<T, Device>();
-    this->castmem_d2h_impl<T, Device>(this->psi_cpu[0].get_pointer() - this->psi_cpu[0].get_psi_bias(),
-                                      psi_t->get_pointer() - psi_t->get_psi_bias(),
-                                      this->psi_cpu[0].size());
+    std::complex<double>* host = this->psi_cpu[0].get_pointer() - this->psi_cpu[0].get_psi_bias();
+    const T* device = psi_t->get_pointer() - psi_t->get_psi_bias();
+    if (static_cast<const void*>(host) == static_cast<const void*>(device))
+    {
+        return; // ABACUS_PSI_MANAGED=1 では同じ配列を共有しているので、写す必要がない。
+    }
+    this->castmem_d2h_impl<T, Device>(host, device, this->psi_cpu[0].size());
 }
 
 void Setup_Psi_pw::copy_d2h()

@@ -254,7 +254,8 @@ void KEDF_Manager::get_potential(
         || this->of_kinetic_ == "ext-wt"
         || this->of_kinetic_ == "xwm" 
         || this->of_kinetic_ == "lkt" 
-        || this->of_kinetic_ == "ml")
+        || this->of_kinetic_ == "ml"
+        || this->of_kinetic_ == "ml-ts")
     {
         this->vw_->vw_potential(pphi, pw_rho, rpot);
     }
@@ -382,7 +383,8 @@ void KEDF_Manager::get_energy_density(
         || this->of_kinetic_ == "wt"
         || this->of_kinetic_ == "ext-wt"
         || this->of_kinetic_ == "xwm" 
-        || this->of_kinetic_ == "lkt")
+        || this->of_kinetic_ == "lkt"
+        || this->of_kinetic_ == "ml-ts")
     {
         this->vw_->tau_vw(pphi, pw_rho, rtau[0]);
     }

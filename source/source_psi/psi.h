@@ -47,8 +47,10 @@ class Psi
 
     // Constructor 2-2: initialize a new psi from the given psi_in with a different class template
     // in this case, psi_in may have a different device type.
+    // managed_storage_in = true（CUDA版、CPUからGPUへの複製のみ）: 全k点の波動関数をCUDA managed memoryに置き、
+    // fix_k で現在のk点の分だけをGPUへ移す。GPUの常駐量は1k点分になり、VRAMを超える波動関数も扱える。
     template <typename T_in, typename Device_in = Device>
-    Psi(const Psi<T_in, Device_in>& psi_in);
+    Psi(const Psi<T_in, Device_in>& psi_in, const bool managed_storage_in = false);
 
     // Constructor 3-1: 2D Psi version
     // used in hsolver-pw function pointer and somewhere.
@@ -163,6 +165,13 @@ class Psi
     bool k_first = true;
 
     bool allocate_inside = true; ///< whether allocate psi inside Psi class
+
+    /// 波動関数がCUDA managed memoryにある（Constructor 2-2 の managed_storage_in）。
+    bool managed_storage = false;
+    /// managed memoryのとき、GPUに置いているk点（-1はなし）。
+    mutable int device_resident_k = -1;
+    /// managed memoryのとき、前のk点をホストへ戻し、現在のk点をGPUへ移す（性能のためのヒントで、正しさはCUDAが保証する）。
+    void move_current_k_to_device() const;
 
 #ifdef __DSP
     using delete_memory_op = base_device::memory::delete_memory_op_mt<T, Device>;

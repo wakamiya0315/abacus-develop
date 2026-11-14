@@ -6,6 +6,9 @@
 #include "source_io/module_parameter/parameter.h"
 
 #include <cassert>
+#if defined(__CUDA)
+#include <cuda_runtime.h>
+#endif
 #include <complex>
 #include <type_traits>
 
@@ -174,8 +177,14 @@ Psi<T, Device>::Psi(const Psi& psi_in)
 // Constructor 2-2:
 template <typename T, typename Device>
 template <typename T_in, typename Device_in>
-Psi<T, Device>::Psi(const Psi<T_in, Device_in>& psi_in)
+Psi<T, Device>::Psi(const Psi<T_in, Device_in>& psi_in, const bool managed_storage_in)
 {
+#if defined(__CUDA)
+    this->managed_storage = managed_storage_in && std::is_same<Device, base_device::DEVICE_GPU>::value
+                            && std::is_same<Device_in, base_device::DEVICE_CPU>::value;
+#else
+    (void)managed_storage_in;
+#endif
 
     this->ngk = psi_in.get_ngk_pointer();
     this->nk = psi_in.get_nk();
@@ -193,7 +202,15 @@ Psi<T, Device>::Psi(const Psi<T_in, Device_in>& psi_in)
     // We first malloc a memory in CPU, then cast the memory from T_in to T in CPU.
     // Finally, synchronize the memory from CPU to GPU.
     // This could help to reduce the peak memory usage of device.
-    if (std::is_same<Device, base_device::DEVICE_GPU>::value && std::is_same<Device_in, base_device::DEVICE_CPU>::value)
+    if (this->managed_storage)
+    {
+        // managed memoryはホストから直接書ける。ホストで書けばページはホスト側に置かれ、GPUの常駐量は増えない。
+        base_device::memory::cast_memory_op<T, T_in, base_device::DEVICE_CPU, base_device::DEVICE_CPU>()(
+            this->psi,
+            psi_in.get_pointer() - psi_in.get_psi_bias(),
+            psi_in.size());
+    }
+    else if (std::is_same<Device, base_device::DEVICE_GPU>::value && std::is_same<Device_in, base_device::DEVICE_CPU>::value)
     {
         auto* arr = (T*)malloc(sizeof(T) * psi_in.size());
         // cast the memory from T_in to T in CPU
@@ -251,7 +268,29 @@ void Psi<T, Device>::resize(const int nks_in, const int nbands_in, const int nba
     assert(nks_in > 0 && nbands_in >= 0 && nbasis_in > 0);
 
     // This function will delete the psi array first(if psi exist), then malloc a new memory for it.
-    resize_memory_op()(this->psi, nks_in * static_cast<std::size_t>(nbands_in) * nbasis_in, "no_record");
+#if defined(__CUDA)
+    if (this->managed_storage)
+    {
+        if (this->psi != nullptr)
+        {
+            cudaFree(this->psi);
+            this->psi = nullptr;
+        }
+        void* ptr = nullptr;
+        const cudaError_t err
+            = cudaMallocManaged(&ptr, sizeof(T) * nks_in * static_cast<std::size_t>(nbands_in) * nbasis_in);
+        if (err != cudaSuccess)
+        {
+            ModuleBase::WARNING_QUIT("Psi::resize", std::string("cudaMallocManaged failed: ") + cudaGetErrorString(err));
+        }
+        this->psi = static_cast<T*>(ptr);
+        this->device_resident_k = -1;
+    }
+    else
+#endif
+    {
+        resize_memory_op()(this->psi, nks_in * static_cast<std::size_t>(nbands_in) * nbasis_in, "no_record");
+    }
 
     // this->zero_out();
 
@@ -385,8 +424,55 @@ void Psi<T, Device>::fix_k(const int ik) const
         this->psi_bias = k_first ? static_cast<std::size_t>(ik) * this->nbands * this->nbasis
                                  : base + static_cast<std::size_t>(ik) * this->nbasis;
         this->psi_current = const_cast<T*>(&(this->psi[psi_bias]));
+        if (this->managed_storage)
+        {
+            this->move_current_k_to_device();
+        }
     }
 }
+
+template <typename T, typename Device>
+void Psi<T, Device>::move_current_k_to_device() const
+{
+#if defined(__CUDA)
+    // k点ごとの帯（nbands × nbasis）が連続するのは k_first のときだけ。
+    if (!this->k_first || this->current_k == this->device_resident_k)
+    {
+        return;
+    }
+    const std::size_t block = static_cast<std::size_t>(this->nbands) * this->nbasis;
+    int device = 0;
+    cudaGetDevice(&device);
+    cudaError_t err_out = cudaSuccess;
+#if CUDART_VERSION >= 13000
+    cudaMemLocation to_host{};
+    to_host.type = cudaMemLocationTypeHost;
+    to_host.id = 0;
+    cudaMemLocation to_device{};
+    to_device.type = cudaMemLocationTypeDevice;
+    to_device.id = device;
+    if (this->device_resident_k >= 0 && this->device_resident_k < this->nk)
+    {
+        err_out = cudaMemPrefetchAsync(this->psi + this->device_resident_k * block, sizeof(T) * block, to_host, 0, 0);
+    }
+    const cudaError_t err_in
+        = cudaMemPrefetchAsync(this->psi + this->current_k * block, sizeof(T) * block, to_device, 0, 0);
+#else
+    if (this->device_resident_k >= 0 && this->device_resident_k < this->nk)
+    {
+        err_out = cudaMemPrefetchAsync(this->psi + this->device_resident_k * block, sizeof(T) * block, cudaCpuDeviceId, 0);
+    }
+    const cudaError_t err_in = cudaMemPrefetchAsync(this->psi + this->current_k * block, sizeof(T) * block, device, 0);
+#endif
+    if (err_out != cudaSuccess || err_in != cudaSuccess)
+    {
+        // prefetchは性能のためのヒントで、失敗してもページフォルトで正しく動く。
+        ModuleBase::WARNING("Psi::move_current_k_to_device", "cudaMemPrefetchAsync failed");
+    }
+    this->device_resident_k = this->current_k;
+#endif
+}
+
 template <typename T, typename Device>
 void Psi<T, Device>::fix_b(const int ib) const
 {
@@ -525,32 +611,32 @@ template class Psi<std::complex<float>, base_device::DEVICE_CPU>;
 template class Psi<double, base_device::DEVICE_CPU>;
 template class Psi<std::complex<double>, base_device::DEVICE_CPU>;
 template Psi<std::complex<float>, base_device::DEVICE_CPU>::Psi(
-    const Psi<std::complex<double>, base_device::DEVICE_CPU>&);
+    const Psi<std::complex<double>, base_device::DEVICE_CPU>&, const bool);
 template Psi<std::complex<double>, base_device::DEVICE_CPU>::Psi(
-    const Psi<std::complex<float>, base_device::DEVICE_CPU>&);
+    const Psi<std::complex<float>, base_device::DEVICE_CPU>&, const bool);
 #if ((defined __CUDA) || (defined __ROCM))
 template class Psi<float, base_device::DEVICE_GPU>;
 template class Psi<std::complex<float>, base_device::DEVICE_GPU>;
-template Psi<float, base_device::DEVICE_CPU>::Psi(const Psi<float, base_device::DEVICE_GPU>&);
-template Psi<float, base_device::DEVICE_GPU>::Psi(const Psi<float, base_device::DEVICE_CPU>&);
+template Psi<float, base_device::DEVICE_CPU>::Psi(const Psi<float, base_device::DEVICE_GPU>&, const bool);
+template Psi<float, base_device::DEVICE_GPU>::Psi(const Psi<float, base_device::DEVICE_CPU>&, const bool);
 template Psi<std::complex<float>, base_device::DEVICE_CPU>::Psi(
-    const Psi<std::complex<float>, base_device::DEVICE_GPU>&);
+    const Psi<std::complex<float>, base_device::DEVICE_GPU>&, const bool);
 template Psi<std::complex<float>, base_device::DEVICE_GPU>::Psi(
-    const Psi<std::complex<float>, base_device::DEVICE_CPU>&);
+    const Psi<std::complex<float>, base_device::DEVICE_CPU>&, const bool);
 
 template class Psi<double, base_device::DEVICE_GPU>;
 template class Psi<std::complex<double>, base_device::DEVICE_GPU>;
-template Psi<double, base_device::DEVICE_CPU>::Psi(const Psi<double, base_device::DEVICE_GPU>&);
-template Psi<double, base_device::DEVICE_GPU>::Psi(const Psi<double, base_device::DEVICE_CPU>&);
+template Psi<double, base_device::DEVICE_CPU>::Psi(const Psi<double, base_device::DEVICE_GPU>&, const bool);
+template Psi<double, base_device::DEVICE_GPU>::Psi(const Psi<double, base_device::DEVICE_CPU>&, const bool);
 template Psi<std::complex<double>, base_device::DEVICE_CPU>::Psi(
-    const Psi<std::complex<double>, base_device::DEVICE_GPU>&);
+    const Psi<std::complex<double>, base_device::DEVICE_GPU>&, const bool);
 template Psi<std::complex<double>, base_device::DEVICE_CPU>::Psi(
-    const Psi<std::complex<float>, base_device::DEVICE_GPU>&);
+    const Psi<std::complex<float>, base_device::DEVICE_GPU>&, const bool);
 template Psi<std::complex<double>, base_device::DEVICE_GPU>::Psi(
-    const Psi<std::complex<double>, base_device::DEVICE_CPU>&);
+    const Psi<std::complex<double>, base_device::DEVICE_CPU>&, const bool);
 template Psi<std::complex<float>, base_device::DEVICE_GPU>::Psi(
-    const Psi<std::complex<double>, base_device::DEVICE_CPU>&);
+    const Psi<std::complex<double>, base_device::DEVICE_CPU>&, const bool);
 template Psi<std::complex<double>, base_device::DEVICE_GPU>::Psi(
-    const Psi<std::complex<float>, base_device::DEVICE_GPU>&);
+    const Psi<std::complex<float>, base_device::DEVICE_GPU>&, const bool);
 #endif
 } // namespace psi

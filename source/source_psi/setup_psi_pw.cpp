@@ -4,7 +4,13 @@
 #include "source_cell/klist.h"
 #include "source_cell/stru_fac.h"
 #include "source_cell/unitcell.h"
+#include "source_base/global_variable.h"
+#include "source_base/tool_quit.h"
 #include "source_io/module_parameter/parameter.h"
+
+#include <cstdlib>
+#include <string>
+#include <type_traits>
 
 Setup_Psi_pw::Setup_Psi_pw()
 {
@@ -69,7 +75,23 @@ void Setup_Psi_pw::before_runner_impl(const UnitCell& ucell,
 
     if (inp.device == "gpu" || inp.precision == "single")
     {
-        this->psi_t = static_cast<void*>(new psi::Psi<T, Device>(this->psi_cpu[0]));
+        // ABACUS_PSI_MANAGED=1（CUDA版）: 全k点の波動関数をCUDA managed memoryに置き、計算中のk点だけをGPUへ移す。
+        // GPUの常駐量が全k点分から1k点分に減る。k点の出し入れはSCF反復ごとに対角化と密度計算の2回。
+        const char* managed_env = std::getenv("ABACUS_PSI_MANAGED");
+        const bool managed = std::is_same<Device, base_device::DEVICE_GPU>::value && managed_env != nullptr
+                             && std::string(managed_env) == "1";
+#if !defined(__CUDA)
+        if (managed)
+        {
+            ModuleBase::WARNING_QUIT("Setup_Psi_pw", "ABACUS_PSI_MANAGED=1 needs the CUDA build");
+        }
+#endif
+        if (managed)
+        {
+            GlobalV::ofs_running << " Wave functions of all k-points are kept in CUDA managed memory"
+                                 << " (ABACUS_PSI_MANAGED=1); only the current k-point resides on the GPU." << std::endl;
+        }
+        this->psi_t = static_cast<void*>(new psi::Psi<T, Device>(this->psi_cpu[0], managed));
     }
     else
     {

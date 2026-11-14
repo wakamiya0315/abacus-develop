@@ -39,7 +39,7 @@ class TD_pot_hybrid<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
     /**
      * @brief Construct a new TD_pot_hybrid object
      */
-    TD_pot_hybrid<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    TD_pot_hybrid(HS_Matrix_K<TK>* hsk_in,
                                       const K_Vectors* kv_in,
                                       HContainer<TR>* hR_in,
                                       HContainer<TR>* SR_in,
@@ -53,7 +53,7 @@ class TD_pot_hybrid<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
     /**
      * @brief Destroy the TD_pot_hybrid object
      */
-    ~TD_pot_hybrid<OperatorLCAO<TK, TR>>();
+    ~TD_pot_hybrid();
 
     /**
      * @brief contributeHR() is used to calculate the HR matrix

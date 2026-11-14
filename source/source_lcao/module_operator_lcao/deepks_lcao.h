@@ -31,7 +31,7 @@ template <typename TK, typename TR>
 class DeePKS<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
 {
   public:
-    DeePKS<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    DeePKS(HS_Matrix_K<TK>* hsk_in,
                                  const std::vector<ModuleBase::Vector3<double>>& kvec_d_in,
                                  HContainer<TR>* hR_in,
                                  const UnitCell* ucell_in,

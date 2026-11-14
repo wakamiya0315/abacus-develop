@@ -34,7 +34,7 @@ template <typename TK, typename TR>
 class TDEkinetic<OperatorLCAO<TK,TR>> : public OperatorLCAO<TK, TR>
 {
   public:
-    TDEkinetic<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    TDEkinetic(HS_Matrix_K<TK>* hsk_in,
                                      hamilt::HContainer<TR>* hR_in,
                                      const K_Vectors* kv_in,
                                      const UnitCell* ucell_in,

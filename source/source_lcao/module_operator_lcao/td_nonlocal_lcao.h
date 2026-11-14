@@ -32,14 +32,14 @@ template <typename TK, typename TR>
 class TDNonlocal<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
 {
   public:
-    TDNonlocal<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    TDNonlocal(HS_Matrix_K<TK>* hsk_in,
                                      const std::vector<ModuleBase::Vector3<double>>& kvec_d_in,
                                      hamilt::HContainer<TR>* hR_in,
                                      const UnitCell* ucell_in,
                                      const LCAO_Orbitals& orb,
                                      const Grid_Driver* GridD_in,
                                      TD_info& td_info);
-    ~TDNonlocal<OperatorLCAO<TK, TR>>();
+    ~TDNonlocal();
 
     /**
      * @brief contributeHR() is used to calculate the HR matrix

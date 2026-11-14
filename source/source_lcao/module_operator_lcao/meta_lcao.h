@@ -20,7 +20,7 @@ template <typename TK, typename TR>
 class Meta<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
 {
   public:
-    Meta<OperatorLCAO<TK, TR>>(
+    Meta(
                           HS_Matrix_K<TK>* hsk_in,
                           const std::vector<ModuleBase::Vector3<double>>& kvec_d_in,
                           HContainer<TR>* hR_in)
@@ -29,7 +29,7 @@ class Meta<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
         this->cal_type = calculation_type::lcao_gint;
     }
 
-    ~Meta<OperatorLCAO<TK, TR>>(){};
+    ~Meta(){};
 
     virtual void contributeHR() override{}//do nothing now
 

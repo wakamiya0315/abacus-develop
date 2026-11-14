@@ -34,7 +34,7 @@ class Veff<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
     /**
      * @brief Construct a new Veff object
     */
-    Veff<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    Veff(HS_Matrix_K<TK>* hsk_in,
                                const std::vector<ModuleBase::Vector3<double>>& kvec_d_in,
                                elecstate::Potential* pot_in,
                                hamilt::HContainer<TR>* hR_in,
@@ -50,7 +50,7 @@ class Veff<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
         this->initialize_HR(ucell_in, GridD_in);
     }
 
-    ~Veff<OperatorLCAO<TK, TR>>(){};
+    ~Veff(){};
 
     /**
      * @brief contributeHR() is used to calculate the HR matrix

@@ -39,7 +39,7 @@ class OperatorEXX<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
   public:
     /// @brief Full-workflow Constructor  that takes Exx_LRI_Interface objects directly.
     /// Used in the main project (HamiltLCAO) for both scf and nscf.
-    OperatorEXX<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    OperatorEXX(HS_Matrix_K<TK>* hsk_in,
                                       hamilt::HContainer<TR>* hR_in,
                                       const UnitCell& ucell,
                                       const K_Vectors& kv_in,
@@ -52,7 +52,7 @@ class OperatorEXX<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
 
     /// @brief One-shot operator constructor, only for adding Hexxs, without exd/exc workflow
     /// Used in write_Vxc
-    OperatorEXX<OperatorLCAO<TK, TR>>(
+    OperatorEXX(
         HS_Matrix_K<TK>* hsk_in,
         hamilt::HContainer<TR>* hR_in,
         const UnitCell& ucell,

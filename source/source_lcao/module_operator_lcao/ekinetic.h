@@ -38,7 +38,7 @@ class EKinetic<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
     /**
      * @brief Construct a new EKinetic object
      */
-    EKinetic<OperatorLCAO<TK, TR>>(HS_Matrix_K<TK>* hsk_in,
+    EKinetic(HS_Matrix_K<TK>* hsk_in,
                                       const std::vector<ModuleBase::Vector3<double>>& kvec_d_in,
                                       HContainer<TR>* hR_in,
                                       const BasisFlattenedIndexing& basis,
@@ -51,7 +51,7 @@ class EKinetic<OperatorLCAO<TK, TR>> : public OperatorLCAO<TK, TR>
     /**
      * @brief Destroy the EKinetic object
      */
-    ~EKinetic<OperatorLCAO<TK, TR>>();
+    ~EKinetic();
 
     /**
      * @brief contributeHR() is used to calculate the HR matrix

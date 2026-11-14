@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 #include "source_base/parallel_cell.h"
@@ -22,6 +23,19 @@ using namespace hsolver;
 
 namespace
 {
+// Block QR orthogonalization for double precision on GPU (fork addition, opt-in).
+// ABACUS uses it only for single precision; in double precision the band-by-band
+// Schmidt orthogonalization (GEMV per band plus a host sync) took about 21% of the
+// SCF time for a 600 Ry slab. ABACUS_DAVID_BLOCK_QR=1 enables the cuSOLVER QR path.
+bool block_qr_double_requested()
+{
+    static const bool requested = [] {
+        const char* value = std::getenv("ABACUS_DAVID_BLOCK_QR");
+        return value != nullptr && std::string(value) == "1";
+    }();
+    return requested;
+}
+
 void warn_skip_degenerate_direction(const int band)
 {
     static std::atomic<bool> warned(false);
@@ -184,10 +198,12 @@ int DiagoDavid<T, Device>::diag_once(const HSOperator<T, Device>& op,
     std::vector<int> pre_matrix_mv_m(nband, 1);
     this->planSchmidtOrth(nband, pre_matrix_mm_m, pre_matrix_mv_m);
 
+    bool initial_orth_done = false;
 #if defined(__CUDA)
     const bool block_qr = this->use_block_qr();
     if (block_qr)
     {
+        ModuleBase::timer::start("DiagoDavid", "block_qr");
         for (int m = 0; m < nband; ++m)
             syncmem_complex_op()(basis + dim*m, psi_in + m*ld_psi, dim);
         // Form the basis without subtracting nearly equal norm estimates.
@@ -217,17 +233,30 @@ int DiagoDavid<T, Device>::diag_once(const HSOperator<T, Device>& op,
                 full_rank = false;
             }
         }
-        if (!full_rank)
+        if (full_rank)
+        {
+            op.spsi(basis, spsi, dim, nband);
+            initial_orth_done = true;
+        }
+        else if (std::is_same<Real, float>::value)
         {
             ModuleBase::WARNING_QUIT("DiagoDavid",
                                      "initial trial wavefunction is linearly dependent; "
                                      "cannot construct an orthonormal Davidson basis.");
         }
-
-        op.spsi(basis, spsi, dim, nband);
+        else
+        {
+            // Double precision: the band-by-band Schmidt path below rebuilds the basis
+            // from psi_in and handles nearly dependent directions itself.
+            ModuleBase::WARNING("DiagoDavid", "initial QR block is rank deficient; falling back to "
+                                              "Schmidt orthogonalization.");
+            ModuleBase::timer::start("DiagoDavid", "block_qr_fallback");
+            ModuleBase::timer::end("DiagoDavid", "block_qr_fallback");
+        }
+        ModuleBase::timer::end("DiagoDavid", "block_qr");
     }
-    else
 #endif
+    if (!initial_orth_done)
     {
     for (int m = 0; m < nband; m++)
     {
@@ -640,17 +669,53 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
         resmem_complex_op()(qr_backup, dim * notconv);
         syncmem_complex_op()(qr_backup, basis + dim * nbase, dim * notconv);
 
+        ModuleBase::timer::start("DiagoDavid", "block_qr");
         // Project the new block once and orthogonalize its columns together.
         ModuleBase::gemm_op<T, Device>()('N', 'N', dim, notconv, nbase,
             this->neg_one, basis, dim, lagrange, nbase + notconv,
             this->one, basis + dim*nbase, dim);
 
+        bool zero_column = false;
+        if (std::is_same<Real, double>::value)
+        {
+            // Double precision (opt-in, ABACUS_DAVID_BLOCK_QR=1): project a second time
+            // (classical Gram-Schmidt twice) so the block stays orthogonal to the basis
+            // even when the preconditioned residuals lie almost inside it. The
+            // coefficients go to a separate array because the Schmidt fallback below
+            // still needs the original `lagrange`.
+            T* lagrange2 = nullptr;
+            resmem_complex_op()(lagrange2, nbase * notconv);
+            ModuleBase::gemm_op<T, Device>()('C', 'N', nbase, notconv, dim,
+                this->one, basis, dim, basis + dim * nbase, dim,
+                this->zero, lagrange2, nbase);
+            ModuleBase::gemm_op<T, Device>()('N', 'N', dim, notconv, nbase,
+                this->neg_one, basis, dim, lagrange2, nbase,
+                this->one, basis + dim * nbase, dim);
+            delmem_complex_op()(lagrange2);
+            // Normalize each column so that the rank test on diag(R) measures linear
+            // dependence, not the very different sizes of the residuals.
+            for (int m = 0; m < notconv; ++m)
+            {
+                T* column = basis + dim * (nbase + m);
+                const Real norm = std::sqrt(ModuleBase::dot_real_op<T, Device>()(dim, column, column, false));
+                if (!(norm > 0))
+                {
+                    zero_column = true;
+                    break;
+                }
+                ModuleBase::vector_mul_real_op<T, Device>()(dim, column, column, Real(1.0 / norm));
+            }
+        }
+
         std::vector<T> rdiag(notconv, T(0));
-        ct::kernels::lapack_geqrf_inplace<T, ct_Device>()(
-            dim, notconv, basis + dim * nbase, dim, rdiag.data());
+        if (!zero_column)
+        {
+            ct::kernels::lapack_geqrf_inplace<T, ct_Device>()(
+                dim, notconv, basis + dim * nbase, dim, rdiag.data());
+        }
 
         const int rdiag_size = std::min(dim, notconv);
-        bool full_rank = rdiag_size == notconv;
+        bool full_rank = rdiag_size == notconv && !zero_column;
         double max_diag = 0.0;
         for (int j = 0; j < rdiag_size; ++j)
         {
@@ -682,10 +747,14 @@ void DiagoDavid<T, Device>::cal_grad(const HSOperator<T, Device>& op,
         {
             syncmem_complex_op()(basis + dim * nbase, qr_backup, dim * notconv);
             ModuleBase::WARNING("DiagoDavid::cal_grad",
-                                "CUDA float QR block is rank deficient; falling back to "
+                                "CUDA QR block is rank deficient; falling back to "
                                 "Schmidt orthogonalization.");
+            // Count fallbacks in the timer table (CALLS column).
+            ModuleBase::timer::start("DiagoDavid", "block_qr_fallback");
+            ModuleBase::timer::end("DiagoDavid", "block_qr_fallback");
         }
         delmem_complex_op()(qr_backup);
+        ModuleBase::timer::end("DiagoDavid", "block_qr");
     }
     if (!qr_used)
 #endif
@@ -1231,7 +1300,7 @@ template <typename T, typename Device>
 inline bool DiagoDavid<T, Device>::use_block_qr() const
 {
     return this->device == base_device::GpuDevice
-           && std::is_same<Real, float>::value
+           && (std::is_same<Real, float>::value || block_qr_double_requested())
            && !this->use_uspp
            && this->diag_comm.nproc == 1;
 }

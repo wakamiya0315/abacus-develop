@@ -464,6 +464,10 @@ protected:
   /// host_fft_on_gpu 用の作業領域（GPU上、初回に確保して再利用）。g は npw、r は nrxx 個の複素数。
   mutable std::complex<double>* d_host_fft_g_ = nullptr;
   mutable std::complex<double>* d_host_fft_r_ = nullptr;
+  /// setuptransform で cuFFT の3D変換を用意したときだけ true（これが false ならホスト配列FFTはCPUのまま）。
+  bool host_fft_gpu_ready_ = false;
+  /// 環境変数 ABACUS_HOST_FFT_ON_GPU が "0" でなければ true。
+  static bool host_fft_gpu_requested();
   void ensure_host_fft_buffers() const;
   void free_host_fft_buffers();
   bool double_data_ = true;         ///<  if has double data

@@ -149,15 +149,20 @@ template void PW_Basis::recip2real_gpu<float>(const std::complex<float>* in,
 #endif
 
 #if (defined(__CUDA) || defined(__ROCM))
-bool PW_Basis::host_fft_on_gpu() const
+bool PW_Basis::host_fft_gpu_requested()
 {
     static const bool enabled = []() {
         const char* env = std::getenv("ABACUS_HOST_FFT_ON_GPU");
         return env == nullptr || std::string(env) != "0";
     }();
-    // 波動関数の基底（PW_Basis_K）は npw の意味が k ごとに異なるので対象外にする。
-    return enabled && this->device == "gpu" && this->poolnproc == 1 && !this->gamma_only && this->npw > 0
-           && this->classname != "PW_Basis_K";
+    return enabled;
+}
+
+bool PW_Basis::host_fft_on_gpu() const
+{
+    // 波動関数の基底（PW_Basis_K）は npw の意味が k ごとに異なるので対象外（setuptransform で ready にならない）。
+    return this->host_fft_gpu_ready_ && this->device == "gpu" && this->poolnproc == 1 && !this->gamma_only
+           && this->npw > 0 && this->ig2ixyz_gpu != nullptr;
 }
 
 void PW_Basis::ensure_host_fft_buffers() const

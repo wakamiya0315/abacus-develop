@@ -61,6 +61,17 @@ void PW_Basis::setuptransform()
     this->distribute_g();
     this->getstartgr();
     this->fft_bundle.clear();
+#if defined(__CUDA) || defined(__ROCM)
+    // 密度・ポテンシャルの基底は、上流では FFT を "cpu" 専用で用意する（コンストラクタの setfft("cpu", ...)）。
+    // ホスト配列FFTのGPU代行を使う場合だけ、cuFFT の3D変換も持つ "gpu" モードにする。
+    // "gpu" モードでもホスト配列の変換（fftzbac など）は従来どおり FFTW のバックエンドで行われる。
+    this->host_fft_gpu_ready_ = false;
+    if (this->device == "gpu" && this->classname != "PW_Basis_K" && host_fft_gpu_requested())
+    {
+        this->fft_bundle.setfft("gpu", this->precision);
+        this->host_fft_gpu_ready_ = true;
+    }
+#endif
     
     if(this->xprime)    
     {

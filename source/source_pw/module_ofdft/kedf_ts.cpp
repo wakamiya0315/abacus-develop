@@ -33,8 +33,10 @@ void KEDF_TS::set_para(const std::string& device_inpt, std::ostream& ofs_running
         ModuleBase::WARNING_QUIT("KEDF_TS", "Failed to load kedf_ts.pt (TorchScript module).");
     }
     this->module_.eval();
-    // ABACUS_MLKEDF_TS_NOOPT=1: TorchScriptのグラフ最適化を止める（最適化で数値が変わらないかの切り分け用）
-    if (std::getenv("ABACUS_MLKEDF_TS_NOOPT") != nullptr)
+    // TorchScriptのグラフ最適化は止める。最適化された2回目以降の呼び出しで、FFT（複素数）を含むモデルの
+    // 自動微分の V_P が誤った値になった（Ptバルク、ネイティブの ml と照合して確認）。
+    // ABACUS_MLKEDF_TS_OPT=1 のときだけ最適化を使う（速度の比較用）。
+    if (std::getenv("ABACUS_MLKEDF_TS_OPT") == nullptr)
     {
         torch::jit::setGraphExecutorOptimize(false);
         ofs_running << " ML-TS KEDF: TorchScript graph optimization disabled" << std::endl;

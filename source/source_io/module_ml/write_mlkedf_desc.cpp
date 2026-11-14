@@ -114,6 +114,15 @@ void labels_from_densities(const elecstate::ElecState* pelec, const double c_tf,
     pauli.resize(nrxx);
     for (int ir = 0; ir < nrxx; ++ir)
     {
+        // KS densities can be slightly negative in vacuum (FFT ringing, e.g. H2 in a 12 A box). There
+        // F = tau_P / rho^{5/3} is NaN, and symmetrize_field (an FFT round trip) would spread the NaN to
+        // every grid point, so set both labels to 0 at such points; they carry no Pauli energy anyway.
+        if (!(rho[ir] > 0.))
+        {
+            enhancement[ir] = 0.;
+            pauli[ir] = 0.;
+            continue;
+        }
         const double grad2 = nabla_rho[0][ir] * nabla_rho[0][ir] + nabla_rho[1][ir] * nabla_rho[1][ir]
                              + nabla_rho[2][ir] * nabla_rho[2][ir];
         const double tau_p = tau_plus[ir] - grad2 / (8. * rho[ir]) * 2.;
